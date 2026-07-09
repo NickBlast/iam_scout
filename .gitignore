@@ -1,5 +1,6 @@
 # Generated exports (real tenant data — never commit)
-output/
+output/*
+!output/.gitkeep
 *.xlsx
 
 # Per-developer local settings

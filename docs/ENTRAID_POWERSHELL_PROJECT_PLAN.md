@@ -17,16 +17,21 @@ track is stable and documented in-repo.
 
 Not glamorous, but everything after this depends on it existing:
 
-- [ ] `git init` + initial commit of current state
-- [ ] `.gitignore` — exclude generated exports (`*.xlsx`, timestamped output
+- [x] `git init` + initial commit of current state
+- [x] `.gitignore` — exclude generated exports (`*.xlsx`, timestamped output
       files), local credential/token cache files
-- [ ] `CLAUDE.md` — seed with the conventions already implicit in
+- [x] `CLAUDE.md` — seed with the conventions already implicit in
       `Export-EntraAppRegistrations.ps1` (see below)
-- [ ] Decide `entra-scripts/` purpose — likely destination for Phase 2
-      scripts, or rename/remove if not needed
-- [ ] Dependency manifest — a `requirements.psd1` or documented
-      `Install-Module` block listing `Microsoft.Graph.Authentication`,
-      `Microsoft.Graph.Applications`, `ImportExcel` with version pins
+- [x] Decide `entra-scripts/` purpose — confirmed as the permanent home for
+      all EntraID scripts (Phase 1's export script plus future Phase 2 scripts)
+- [x] Dependency manifest — `requirements.psd1` listing
+      `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`,
+      `ImportExcel` (versions intentionally unpinned until a known-good
+      combination is verified)
+- [ ] `output/` directory exists and is gitignored, but the script's
+      `-OutputDirectory` default still points at the current directory —
+      decide whether to change the script default or leave it opt-in via
+      the flag
 
 ## Phase 1 — App Registration Export (COMPLETE)
 
