@@ -111,3 +111,59 @@ than assuming continuity between sessions.
 
 **Candidate for CLAUDE.md:** No — process/verification findings, not a
 durable rule.
+
+---
+
+## 2026-07-09 — MCP doc-lookup call audit (Microsoft Learn / Context7)
+
+**What was built/changed:** Audited actual MCP tool-call history across all
+`.jsonl` session transcripts under
+`~/.claude/projects/c--Users-nlund--projects-iam-scout/` (grepped for real
+`mcp__claude_ai_Microsoft_Learn__*` / `Context7` tool_use entries, not just
+string mentions — the raw grep count included false positives from
+`ToolSearch` result text listing the tool name). No Context7 calls were made
+in any session; all doc-lookup calls were Microsoft Learn.
+
+**Audit result — 7 real doc-lookup calls found, classified:**
+1. `7a727dad` 02:29:16 — `microsoft_docs_search` "Get-MgApplication ...
+   pagination -All parameter"
+2. `7a727dad` 02:29:17 — `microsoft_docs_search` "Get-MgApplication required
+   permissions ... Application.Read.All scope" (same assistant turn as #1,
+   same cmdlet) → **(a) mergeable** — #1 and #2 answer two sub-questions
+   about the same cmdlet and were issued back-to-back; one query asking for
+   parameters/pagination and required scope together would have covered
+   both.
+3. `7a727dad` 02:36:45 — `microsoft_docs_search` "Get-MgApplicationOwner ...
+   list owners" → **(c) necessary** — different cmdlet, added once the
+   owners feature was actually being built, ~7 min after #1/#2 resolved.
+4. `abbd4cbb` 19:06:50 — `microsoft_docs_search` "Connect-MgGraph app-only
+   authentication client secret ClientSecretCredential" → **(c) necessary**.
+5. `abbd4cbb` 19:06:51 — `microsoft_code_sample_search` (same query, next
+   tool call, 1s later) → **(c) necessary** — this is the MCP server's own
+   documented workflow (search for breadth, then code-sample for snippets),
+   not redundant.
+6. `abbd4cbb` 19:08:13 — `microsoft_docs_search` "ConvertFrom-SecureString
+   DPAPI encryption ... Windows Data Protection API" → **(c) necessary**,
+   distinct topic (secret storage, not Graph auth).
+7. `f91e5898` 19:22:21 — `microsoft_docs_search` "Connect-MgGraph app-only
+   authentication client secret ClientSecretCredential PSCredential" →
+   **(b) repeated** — near-identical query to #4, ~16 minutes later, in a
+   different session-transcript file from the same same-day work arc (likely
+   a session boundary/compaction, not a genuinely new question). The answer
+   from #4 was already available and should have been reused instead of
+   re-querying.
+
+**Before/after estimate if the batching rule below had been applied:** 7
+calls → 5 calls (merge #1+#2 into one call: −1; drop #7 as redundant: −1).
+That's a ~29% reduction in doc-lookup calls, with zero loss of information
+in either case (the merged query and the reused answer cover the same
+ground).
+
+**Efficiency note:** The raw `grep -c` count across files (20 total
+occurrences of the string `mcp__claude_ai_(Microsoft_Learn|Context7)`) was
+not the real call count — most matches were the tool name appearing inside
+`ToolSearch` result payloads or system-reminder text, not actual `tool_use`
+blocks. Counting real MCP calls requires filtering to `"type":"tool_use"`
+entries with a matching `name` field, not a flat string grep.
+
+**Candidate for CLAUDE.md:** Yes — see proposed diff below (not applied).

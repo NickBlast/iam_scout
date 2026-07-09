@@ -3,6 +3,21 @@
 Project context lives in `docs/` — check @docs/README.md before assuming
 something doesn't exist or isn't documented.
 
+## MCP usage (Microsoft Learn / Context7)
+- Batch related lookups into one query instead of one call per sub-question
+  — e.g. a cmdlet's parameters, required scope, and pagination pattern
+  belong in a single `microsoft_docs_search` call, not three.
+- Before calling a doc-lookup MCP tool, check whether the same question was
+  already answered earlier in this session (or a recent session on the same
+  task) and reuse that answer instead of re-querying.
+- Reserve MCP doc calls for genuine uncertainty (an unfamiliar cmdlet,
+  version-specific behavior) — don't default to look-up-first for things
+  already established in this file or answered earlier.
+- If a doc lookup produces a durable technical pattern (not a one-off
+  fact), capture the answer in this file's Graph/PowerShell conventions
+  section via the `LEARNINGS.md` distillation step, so it's answered zero
+  times in future sessions — not just fewer times per session.
+
 ## Commands
 - Run export: `pwsh ./entra-scripts/Export-EntraAppRegistrations.ps1 -TenantId <tenant> -ClientId <appId>`
   - First run prompts for the client secret and stores it (DPAPI); later runs are silent.
@@ -36,6 +51,14 @@ something doesn't exist or isn't documented.
   the EntraID/PowerShell track is stable and documented.
 
 ## Workflow: end-of-task self-review
+
+### Verifying repo state
+Don't trust `docs/`, named file lists in requests, or assumed session
+continuity as ground truth about repo state — it drifts (files move, git
+identity/remote/branch can change outside this workflow). Before confirming
+or acting on a claim about repo state, check directly (`Glob`/`ls` the
+directory, `git status`/`git remote -v`) rather than trusting the doc or the
+last-known state.
 
 Before finishing any task, answer briefly (skip any that don't apply — don't pad):
 1. Did I hit an error or wrong assumption that cost extra iterations? What was it, and what's the fix for next time?
