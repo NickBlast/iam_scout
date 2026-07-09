@@ -47,3 +47,36 @@ from-scratch investigation.
 
 **Candidate for CLAUDE.md:** Yes — repo hygiene rules (git, gitignore,
 manifest) and the Graph/PowerShell conventions above.
+
+---
+
+## 2026-07-09 — docs/ index + CLAUDE.md seed + Phase 0 hygiene
+
+**What was built/changed:** `docs/README.md` (standing index), repo-root
+`CLAUDE.md` (verified against `Export-EntraAppRegistrations.ps1` rather than
+copied verbatim from the plan doc's seed), `.gitignore`, `requirements.psd1`,
+`git init` + initial commit. `entra-scripts/` confirmed as the permanent home
+for all EntraID scripts (user decision, not guessed). Deleted a stray
+`EntraAppRegistrations_*.xlsx` containing real tenant data that predated git.
+
+**Error hit:** Named files the user described didn't match the directory's
+actual contents on the first pass — `IAM_SCOUT_LEARNING_LOOP.md` didn't
+exist yet (only showed up later as `IAM_SCOUT_LEARNING_LOOP_1.md`, a save-
+conflict artifact), an empty `docs/CLAUDE.md` and a `docs/status/` snapshot
+existed but weren't mentioned, and `Export-EntraAppRegistrations.ps1` had
+already moved from repo root into `entra-scripts/`, making the existing
+status snapshot stale.
+
+**Fix/learning:** When asked to "confirm current state" against a list of
+named files, `ls`/`Glob` the containing directory first rather than reading
+only the named files — catches missing/extra/renamed files in one shot
+instead of surfacing them one at a time via read errors.
+
+**Efficiency note:** Also discovered git had no `user.name`/`user.email`
+configured anywhere on this machine (not just this repo) — first `git init`
+on a fresh machine should expect to hit this and ask for identity up front
+rather than after attempting a commit.
+
+**Candidate for CLAUDE.md:** No — these are one-off process/environment
+findings (stale docs, unset git identity), not durable rules about the
+codebase itself.
