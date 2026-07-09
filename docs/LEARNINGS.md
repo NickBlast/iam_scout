@@ -80,3 +80,34 @@ rather than after attempting a commit.
 **Candidate for CLAUDE.md:** No — these are one-off process/environment
 findings (stale docs, unset git identity), not durable rules about the
 codebase itself.
+
+---
+
+## 2026-07-09 — CLAUDE.md verification against repo state
+
+**What was built/changed:** Verified three CLAUDE.md claims against actual
+files instead of trusting the doc: script location (`entra-scripts/`,
+confirmed accurate), the `-OutputDirectory`/`-InstallMissingModules`/
+`-ResetCredential` param block (confirmed accurate, quoted directly from the
+script), and the `output/` directory (found **not** accurate — gitignored in
+pattern only, directory never existed, script default still points at the
+current directory). Created `output/` with a `.gitkeep` (using an
+`output/*` / `!output/.gitkeep` gitignore pattern so the empty dir is
+trackable), checked off completed Phase 0 items in
+`ENTRAID_POWERSHELL_PROJECT_PLAN.md`, and left the `-OutputDirectory` default
+decision as an explicit open item rather than silently deciding it.
+
+**Error hit:** `CLAUDE.md` stated the `output/` convention as if fully wired
+up when only the `.gitignore` pattern existed — a doc can drift out of sync
+with reality even one commit after being "verified," so re-verify specific
+claims against the filesystem, not just against the doc's own internal
+consistency.
+
+**Also discovered:** a git remote (`github.com/NickBlast/iam_scout`) and a
+branch rename (`master` → `main`) appeared between sessions, outside of any
+action taken here — repo state can change from outside this workflow
+(user's own git commands), so check `git remote -v` / branch name rather
+than assuming continuity between sessions.
+
+**Candidate for CLAUDE.md:** No — process/verification findings, not a
+durable rule.
