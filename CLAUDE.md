@@ -38,6 +38,13 @@ something doesn't exist or isn't documented.
   they paginate silently otherwise.
 - `entra-scripts/` is the home for all EntraID PowerShell scripts (Phase 1's
   export script plus future Phase 2 scripts).
+- Reusable Graph app-only auth (cert + client-secret paths), the DPAPI
+  credential store, and the missing-module install check live in
+  `entra-scripts/modules/iam-scout-graph-auth/` — import it rather than
+  re-implementing auth in a new script. File/folder names in `entra-scripts/`
+  are lowercase-hyphenated; exported PowerShell function names stay PascalCase
+  `Verb-Noun` using only `Get-Verb`-approved verbs (e.g. `Connect-IamScoutGraph`)
+  — these are two independent naming domains, not a conflict.
 - Generated `.xlsx` exports go to a gitignored `output/` directory, not the repo root.
 - Never export secret *values* — metadata only (expiry, key ID, type) — once
   Phase 2 adds secrets metadata collection.
@@ -45,6 +52,20 @@ something doesn't exist or isn't documented.
   until Phase 2 is explicitly scoped.
 - No audit/sign-in log calls (`Get-MgAuditLog*`/`Get-MgReport*`) until Phase 2
   is explicitly scoped.
+- Rollback convention for any refactor: tag the pre-change commit
+  (`git tag pre-<change-name>`) before starting — that tag is the
+  authoritative rollback mechanism. A convenience copy of the old file(s) may
+  go in `.archive/` (gitignored) for quick side-by-side reading, but it is
+  never the thing you roll back to.
+- Standing rule: any change to code under `entra-scripts/` is not complete
+  until both (a) a documentation check confirms the relevant cmdlet/API usage
+  against current Microsoft Learn guidance, and (b) a live functional test
+  runs the changed script against the test tenant and the output is compared
+  field-for-field/row-for-row against a fresh run of the prior version (or,
+  if there is no prior version, sanity-checked against expected tenant data).
+  Report the actual diff, not just pass/fail.
+- Live functional tests must be read-only against the tenant — no
+  write/create/delete Graph calls as a side effect of validation.
 
 ## Out of scope (parked, not abandoned)
 - AWS collector, FastAPI backend, React dashboard, SQLite — deferred until

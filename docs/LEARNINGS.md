@@ -167,3 +167,60 @@ blocks. Counting real MCP calls requires filtering to `"type":"tool_use"`
 entries with a matching `name` field, not a flat string grep.
 
 **Candidate for CLAUDE.md:** Yes — see proposed diff below (not applied).
+
+---
+
+## 2026-07-09 — Extracted Graph auth into iam-scout-graph-auth module
+
+**What was built/changed:** Tagged `pre-graph-auth-module` as the rollback
+point, then extracted Graph app-only auth (cert + client-secret paths), the
+DPAPI credential store/`-ResetCredential` logic, and the missing-module
+install check out of `Export-EntraAppRegistrations.ps1` (left untouched, read
+only as reference) into a new module at
+`entra-scripts/modules/iam-scout-graph-auth/`. Created
+`entra-scripts/export-entra-app-registrations-v2.ps1`, which imports the
+module and keeps only Graph data retrieval + Excel export. Archived a dated
+copy of the original to `.archive/` (gitignored — convenience only, not the
+rollback mechanism) and added `.archive/` to `.gitignore`.
+
+**MCP audit for this task:** 2 `microsoft_docs_search` calls total, one for
+`Connect-MgGraph` app-only auth (cert `-CertificateThumbprint`/
+`-CertificateName` params + client-secret `-ClientSecretCredential`, batched
+into a single query per the batching rule) and one for PowerShell module
+manifest structure + `Get-Verb`/approved-verb naming (also batched: manifest
+keys, `FunctionsToExport`, and verb rules in one call). Zero redundant calls,
+consistent with the CLAUDE.md MCP usage rule added earlier today.
+
+**Naming-convention conflict resolution:** The task specified two naming
+conventions that look contradictory at first glance: all new file/folder
+names lowercase-hyphenated (`iam-scout-graph-auth.psd1`,
+`export-entra-app-registrations-v2.ps1`), but exported *function* names must
+stay PascalCase `Verb-Noun` using only `Get-Verb`-approved verbs
+(`Connect-IamScoutGraph`, not `connect-iamscoutgraph`). Resolved by treating
+these as two independent naming domains — filesystem naming vs. PowerShell
+command naming — and applying each convention only within its own domain.
+`Get-Verb` (verified via Microsoft Learn) confirmed `Connect`, `Disconnect`,
+and `Initialize` are all approved verbs, so
+`Connect-IamScoutGraph`/`Disconnect-IamScoutGraph`/
+`Initialize-IamScoutRequiredModule` needed no substitution.
+
+**Validation results (both required checks):**
+1. *Documentation check:* auth code matches current Microsoft Learn guidance
+   — `Connect-MgGraph -ClientSecretCredential <pscredential>` for the secret
+   path (`PSCredential` UserName = client id, password = secret) and
+   `Connect-MgGraph -ClientId -TenantId [-CertificateThumbprint |
+   -CertificateName]` for the certificate path, both confirmed against
+   `graph-powershell-1.0` docs fetched this session.
+2. *Live functional test:* ran `Export-EntraAppRegistrations.ps1` and
+   `export-entra-app-registrations-v2.ps1` back-to-back against the same test
+   tenant (existing stored DPAPI secret, `-IncludeOwners` on both) and
+   diffed the two `.xlsx` outputs field-by-field
+   (`DisplayName`, `AppId`, `Id`, `SignInAudience`, `PublisherDomain`,
+   `Owners`, `CreatedDateTime`) after sorting both by `AppId`. **Result: 3/3
+   rows matched on every field, zero mismatches.** The v2 script is a
+   verified behavioral drop-in for the original outside of the internal
+   auth-code path.
+
+**Candidate for CLAUDE.md:** Yes — see proposed diff (module location/naming,
+rollback-tag convention, and a standing dual-validation requirement for any
+`entra-scripts/` change) presented for review, not yet applied.

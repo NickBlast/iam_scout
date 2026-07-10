@@ -5,3 +5,7 @@ output/*
 
 # Per-developer local settings
 .claude/settings.local.json
+
+# Convenience copy of pre-refactor scripts (not the rollback mechanism --
+# git tags are; see docs/LEARNINGS.md)
+.archive/
