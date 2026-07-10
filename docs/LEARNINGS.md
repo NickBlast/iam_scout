@@ -367,3 +367,75 @@ only if a Bash-based edit of CLAUDE.md is actually attempted in practice.
 **Candidate for CLAUDE.md:** Yes — one line noting the no-self-edit rule is
 now hook-enforced, not just advisory. Proposed separately as a diff for
 review (not applied directly, per the very rule being enforced).
+
+---
+
+## 2026-07-09 — End-to-end audit of the CLAUDE.md protection hook
+
+**What was checked (not changed):** re-verified the PreToolUse hook from the
+previous entry actually works live, plus two things the prior test didn't
+cover: whether a second `CLAUDE.md` exists under `docs/`, and whether the
+hook's file match is basename-only or full-path.
+
+**Results:**
+1. **`docs/CLAUDE.md` existence:** does not currently exist (`ls`/`cat`/
+   `git ls-files` all confirm no such file, tracked or untracked). An earlier
+   LEARNINGS entry apparently flagged it as present-but-empty and unresolved
+   — that is no longer the repo state now, for whatever reason (moved,
+   deleted, or the earlier flag was itself stale). Not investigating further
+   since it's moot while the file doesn't exist.
+2. **Match scope:** `protect-claude-md.sh` matches on **basename only**
+   (`basename -- "$file_path"`), not full path. **This means if `docs/CLAUDE.md`
+   (or any other `CLAUDE.md` anywhere in the repo) is ever created, it will
+   also be blocked from Edit/Write/MultiEdit by this hook**, identically to
+   the root file. This is a real decision point, not a bug: it hasn't come up
+   because no second `CLAUDE.md` currently exists, but if one is intentionally
+   added later (e.g. a docs-specific one meant to be casually editable), the
+   current hook would block it too. **Flagging for Nick's decision — not
+   changing the match logic without direction.**
+3. **Git tracking of `.claude/settings.json`:** tracked (`git ls-files`
+   confirms it, not gitignored, not local-only). Pass.
+4. **Git-tracked file mode of the hook script:** `git ls-files -s` shows
+   `100644`, not `100755` — **the executable bit was not preserved in git**,
+   despite `chmod +x` having been run on the working-tree file after creation.
+   Likely cause: the file was created via the `Write` tool (which doesn't set
+   the x bit) and staged/committed before or without an intervening
+   `git update-index --chmod=+x`; `chmod +x` on the working-tree file alone
+   doesn't change what git has recorded in the index/tree unless the chmod
+   happens before `git add` (or `update-index --chmod` is run explicitly).
+   Practical impact right now: none observed — the hook still fires
+   correctly in this session, because Claude Code invokes it as `bash
+   .claude/hooks/protect-claude-md.sh` (explicit interpreter), not by
+   executing the file directly, so the missing +x bit doesn't matter for the
+   current settings.json wiring. But the git-recorded mode is wrong
+   relative to what was reported as verified in the last LEARNINGS entry
+   ("Make it executable" / mode check was never actually run then — this
+   audit is the first time `git ls-files -s` was checked). **Flagging as a
+   real discrepancy, not fixing** — fix would be `git update-index
+   --chmod=+x .claude/hooks/protect-claude-md.sh` plus a commit, pending
+   confirmation this is worth doing given the hook works regardless via the
+   explicit `bash` invocation in `settings.json`.
+5. **Live Edit attempt against root `CLAUDE.md`:** blocked. Actual stderr:
+   `PreToolUse:Edit hook error: [bash .claude/hooks/protect-claude-md.sh]:
+   CLAUDE.md edits require human review. Propose a diff in chat instead of
+   editing this file directly — do not retry this write.` No retry attempted
+   after the block, consistent with the intended behavior (propose a diff in
+   chat instead).
+6. **Live Write attempt against root `CLAUDE.md`:** blocked with the
+   identical message/behavior.
+7. **Unrelated-file edit (`docs/LEARNINGS.md`) during the same session:**
+   succeeded normally (test line added then reverted), confirming the hook's
+   block is scoped to `CLAUDE.md`-named files only.
+
+**Open questions for Nick (not resolved here):**
+- Should the hook match by basename (blocks any `CLAUDE.md` anywhere,
+  including a future `docs/CLAUDE.md`) or by exact repo-root path only?
+- Is the `docs/CLAUDE.md` mentioned in an earlier LEARNINGS entry meant to
+  exist at all — was it deleted intentionally, or never resolved and just
+  quietly absent?
+- Should `.claude/hooks/protect-claude-md.sh`'s git-recorded mode be fixed to
+  100755 via `git update-index --chmod=+x`, even though the current
+  `settings.json` wiring (`bash <script>`) doesn't depend on the x bit?
+
+**Candidate for CLAUDE.md:** No — this is an audit finding requiring a
+decision, not a settled convention yet.
