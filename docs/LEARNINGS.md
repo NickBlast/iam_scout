@@ -224,3 +224,104 @@ and `Initialize` are all approved verbs, so
 **Candidate for CLAUDE.md:** Yes — see proposed diff (module location/naming,
 rollback-tag convention, and a standing dual-validation requirement for any
 `entra-scripts/` change) presented for review, not yet applied.
+
+---
+
+## 2026-07-09 — Expanded app registration export to full `application` schema + multi-sheet workbook
+
+**What was built/changed:** Tagged `pre-app-registration-expand` as the rollback
+point. `entra-scripts/export-entra-app-registrations-v2.ps1` now selects the
+full documented set of top-level Microsoft Graph `application` resource
+properties (39 properties; `logo` excluded — Stream type, not retrievable via
+list `$select`) instead of the original 6-field subset, and exports to a
+single workbook with 7 possible worksheets: `Core` (one row per app, always
+written even for a 0-app tenant guard case) plus `RedirectUris`,
+`RequiredResourceAccess`, `KeyCredentials`, `PasswordCredentials`, `AppRoles`,
+`Oauth2PermissionScopes` — each row joined back to `Core` via `AppId`.
+Collection sheets are omitted entirely when zero apps have any entries for
+that collection (`ImportExcel`/`Export-Excel` requires at least one row per
+worksheet); `Core` is unconditionally present regardless. Complex/nested
+top-level properties that aren't broken into their own sheet (verifiedPublisher,
+certification, info, optionalClaims, parentalControlSettings,
+requestSignatureVerification, servicePrincipalLockConfiguration, addIns, and
+the non-`oauth2PermissionScopes` parts of `api`/`web`) are compact-JSON-
+serialized into `*Json` columns on `Core` rather than guessed at and flattened,
+so no property name is fabricated. Did not modify
+`entra-scripts/modules/iam-scout-graph-auth/` or the original
+`Export-EntraAppRegistrations.ps1` (out of scope for this task).
+
+**Property list source:** Microsoft Graph `application` resource type v1.0
+reference (`learn.microsoft.com/graph/api/resources/application`), fetched in
+full (not just the paginated `microsoft_docs_search` excerpts, which only
+return partial property tables per call) via `microsoft_docs_fetch`. Cross-
+checked every property name against the live
+`Microsoft.Graph.PowerShell.Models.MicrosoftGraphApplication` .NET type via
+`[Type]::GetProperties()` — this caught one naming mismatch the Graph API
+docs didn't warn about (see Errors below). Also fetched `apiApplication` to
+confirm `oauth2PermissionScopes` lives under `api`, not top-level, so the
+Core select list requests `api` and the sheet-builder reads
+`$app.Api.Oauth2PermissionScopes`.
+
+**Secret-value confirmation (explicit, per task requirement):** Fetched
+`passwordCredential` and `keyCredential` resource type docs. Confirmed
+`passwordCredentials.secretText` is documented as "Read-only; ... only
+returned during the initial POST request to addPassword. There is no way to
+retrieve this password in the future" — i.e., a `GET`/list call (which is all
+this script ever does) can never return the actual secret value, confirmed
+both by the doc and by the live test (the `PasswordCredentials` sheet has no
+secret-value column; only `KeyId`, `CredentialDisplayName`, `Hint`,
+`StartDateTime`, `EndDateTime`). Confirmed `keyCredentials.key` (the raw
+certificate bytes) similarly requires an explicit `$select` on a
+single-object `GET` and is "always `null`" otherwise — since this script
+uses `-All` (a list call), `key` is always null regardless, so it was
+excluded from the `KeyCredentials` sheet columns entirely rather than
+included as a column that would always read empty.
+
+**Naming mismatch caught by SDK cross-check:** The Graph API property is
+`oauth2RequiredPostResponse`, but the deserialized
+`Microsoft.Graph.PowerShell.Models.MicrosoftGraphApplication` .NET property is
+named `Oauth2RequirePostResponse` (no "d" on "Required"). First live test run
+failed with `Write-Error: The property 'Oauth2RequiredPostResponse' cannot be
+found on this object`. Fixed by running
+`[Microsoft.Graph.PowerShell.Models.MicrosoftGraphApplication].GetProperties().Name`
+and diffing against every property name used in the script (also
+pre-emptively checked `Api`, `Web`, `KeyCredential`, `PasswordCredential`,
+`AppRole`, `PermissionScope`, `RequiredResourceAccess`, `ResourceAccess`
+nested types the same way) — all other names matched on the first pass.
+**Fix/learning:** when consuming a PowerShell SDK's deserialized objects,
+verify property names against the SDK's own .NET type via `GetProperties()`,
+not just against the Graph REST API's camelCase doc names — the SDK does not
+always PascalCase a REST property name literally.
+
+**Validation results (both required checks):**
+1. *Documentation check:* full property list, `-Property`/`$select` support,
+   and secret-metadata-only behavior all confirmed against current Microsoft
+   Learn `graph-rest-1.0` docs (see above).
+2. *Live functional test:* ran the original `Export-EntraAppRegistrations.ps1`
+   and the expanded `export-entra-app-registrations-v2.ps1` back-to-back
+   against the same test tenant (3 app registrations, `-IncludeOwners` on
+   both, existing stored DPAPI secret — no write/create/delete calls made).
+   Compared the original's single sheet against v2's `Core` sheet on every
+   field the original ever emitted (`DisplayName`, `AppId`, `Id`,
+   `SignInAudience`, `PublisherDomain`, `CreatedDateTime`, `Owners`):
+   **3/3 rows matched on every field, zero mismatches.** Confirmed v2's new
+   sheets: `RequiredResourceAccess` populated (44 rows across the 3 apps),
+   `PasswordCredentials` populated (2 rows, metadata only, no secret values),
+   `Core` present for all 3 apps regardless; `RedirectUris`, `KeyCredentials`,
+   `AppRoles`, `Oauth2PermissionScopes` sheets correctly omitted because none
+   of the 3 test apps have any entries in those collections.
+
+**Efficiency note:** a stray `pwsh -Command` invocation from the Bash tool
+using a forward-slash bash-style path (`/c/Users/...`) as an `-OutputDirectory`
+argument silently wrote output to a bogus `C:\c\Users\...` directory instead
+of erroring — `Join-Path`/`New-Item -Force` happily created the nonsense path
+rather than failing. **Fix/learning:** when passing paths from the Bash tool
+into a `pwsh -Command` string, always convert to native Windows
+backslash-and-drive-letter form first; a "successful" run with no error is not
+proof the output landed where intended — verify the reported output path
+looks like a real Windows path before trusting it.
+
+**Candidate for CLAUDE.md:** No new durable rule beyond what's already
+captured (dual-validation requirement, read-only testing) — the SDK
+property-name cross-check and the bash-path-into-pwsh gotcha are one-off
+process findings, not repo conventions.

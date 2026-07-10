@@ -67,14 +67,41 @@ Import-Module (Join-Path $PSScriptRoot 'modules/iam-scout-graph-auth/iam-scout-g
 
 
 #-------------------------------------------------------------------------------
+# ConvertTo-IamScoutJson
+#
+# Purpose : Compact-serialize a nested/complex Graph property for a Core-sheet
+#           cell. Returns '' for $null so every app's Core row has the same
+#           columns populated (possibly empty) rather than missing values.
+#-------------------------------------------------------------------------------
+function ConvertTo-IamScoutJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)]
+        [object] $InputObject
+    )
+    process {
+        if ($null -eq $InputObject) { return '' }
+        return ($InputObject | ConvertTo-Json -Compress -Depth 8)
+    }
+}
+
+
+#-------------------------------------------------------------------------------
 # Get-AppRegistration
 #
-# Purpose : Retrieve all app registrations and flatten the properties of interest
-#           into simple objects suitable for export.
+# Purpose : Retrieve all app registrations and flatten them into a fixed schema:
+#           one "Core" record per app (every top-level scalar/simple property,
+#           plus JSON-serialized nested settings that aren't broken into their
+#           own sheet), and one record per entry in each multi-value collection
+#           (redirect URIs, requiredResourceAccess, keyCredentials,
+#           passwordCredentials metadata, appRoles, oauth2PermissionScopes),
+#           each carrying the parent app's AppId as a join key. Every app
+#           appears in Core even if every collection is empty for it.
 # Params  : -IncludeOwners  When set, makes one Get-MgApplicationOwner call per app
-#                           and adds a semicolon-delimited Owners column.
-# Returns : An array of PSCustomObjects (one per app registration). Empty array if
-#           the tenant has no app registrations. Throws if retrieval fails.
+#                           and adds a semicolon-delimited Owners column to Core.
+# Returns : A PSCustomObject with Core/RedirectUris/RequiredResourceAccess/
+#           KeyCredentials/PasswordCredentials/AppRoles/Oauth2PermissionScopes
+#           array properties. Throws if retrieval fails.
 #-------------------------------------------------------------------------------
 function Get-AppRegistration {
     [CmdletBinding()]
@@ -82,15 +109,51 @@ function Get-AppRegistration {
         [switch] $IncludeOwners
     )
 
-    # $select the exact fields we export to keep the response small. -All is
+    # Full set of top-level `application` resource properties (Microsoft Graph
+    # v1.0 reference, docs/LEARNINGS.md 2026-07-09 entry). Excludes `logo`
+    # (Stream type; not retrievable via list -Property/$select). -All is
     # required because Get-MgApplication returns only the first page by default.
     $selectProperties = @(
         'id'
         'appId'
         'displayName'
         'signInAudience'
-        'createdDateTime'
         'publisherDomain'
+        'createdDateTime'
+        'deletedDateTime'
+        'description'
+        'notes'
+        'disabledByMicrosoftStatus'
+        'tags'
+        'identifierUris'
+        'groupMembershipClaims'
+        'isDeviceOnlyAuthSupported'
+        'isFallbackPublicClient'
+        'oauth2RequiredPostResponse'
+        'applicationTemplateId'
+        'createdByAppId'
+        'serviceManagementReference'
+        'samlMetadataUrl'
+        'uniqueName'
+        'tokenEncryptionKeyId'
+        'nativeAuthenticationApisEnabled'
+        'verifiedPublisher'
+        'certification'
+        'info'
+        'optionalClaims'
+        'parentalControlSettings'
+        'requestSignatureVerification'
+        'servicePrincipalLockConfiguration'
+        'addIns'
+        'managerApplications'
+        'api'
+        'web'
+        'spa'
+        'publicClient'
+        'keyCredentials'
+        'passwordCredentials'
+        'requiredResourceAccess'
+        'appRoles'
     )
 
     try {
@@ -105,23 +168,66 @@ function Get-AppRegistration {
     $applications = @($applications)
     Write-Host "Found $($applications.Count) app registration(s)." -ForegroundColor Cyan
 
+    $core                  = [System.Collections.Generic.List[object]]::new()
+    $redirectUris          = [System.Collections.Generic.List[object]]::new()
+    $requiredResourceAccess = [System.Collections.Generic.List[object]]::new()
+    $keyCredentials        = [System.Collections.Generic.List[object]]::new()
+    $passwordCredentials   = [System.Collections.Generic.List[object]]::new()
+    $appRoles              = [System.Collections.Generic.List[object]]::new()
+    $oauth2Scopes          = [System.Collections.Generic.List[object]]::new()
+
     if ($applications.Count -eq 0) {
-        return @()
+        return [pscustomobject]@{
+            Core                    = $core.ToArray()
+            RedirectUris            = $redirectUris.ToArray()
+            RequiredResourceAccess  = $requiredResourceAccess.ToArray()
+            KeyCredentials          = $keyCredentials.ToArray()
+            PasswordCredentials     = $passwordCredentials.ToArray()
+            AppRoles                = $appRoles.ToArray()
+            Oauth2PermissionScopes  = $oauth2Scopes.ToArray()
+        }
     }
 
-    $records = [System.Collections.Generic.List[object]]::new()
     $index = 0
 
     foreach ($app in $applications) {
         $index++
 
-        $record = [ordered]@{
-            DisplayName     = $app.DisplayName
-            AppId           = $app.AppId
-            Id              = $app.Id            # object id
-            SignInAudience  = $app.SignInAudience
-            CreatedDateTime = $app.CreatedDateTime
-            PublisherDomain = $app.PublisherDomain
+        $coreRecord = [ordered]@{
+            DisplayName                     = $app.DisplayName
+            AppId                           = $app.AppId
+            Id                              = $app.Id            # object id
+            SignInAudience                  = $app.SignInAudience
+            PublisherDomain                 = $app.PublisherDomain
+            CreatedDateTime                 = $app.CreatedDateTime
+            DeletedDateTime                 = $app.DeletedDateTime
+            Description                     = $app.Description
+            Notes                           = $app.Notes
+            DisabledByMicrosoftStatus       = $app.DisabledByMicrosoftStatus
+            Tags                            = if ($app.Tags) { $app.Tags -join '; ' } else { '' }
+            IdentifierUris                  = if ($app.IdentifierUris) { $app.IdentifierUris -join '; ' } else { '' }
+            GroupMembershipClaims           = $app.GroupMembershipClaims
+            IsDeviceOnlyAuthSupported       = $app.IsDeviceOnlyAuthSupported
+            IsFallbackPublicClient          = $app.IsFallbackPublicClient
+            OAuth2RequiredPostResponse      = $app.Oauth2RequirePostResponse
+            ApplicationTemplateId           = $app.ApplicationTemplateId
+            CreatedByAppId                  = $app.CreatedByAppId
+            ServiceManagementReference      = $app.ServiceManagementReference
+            SamlMetadataUrl                 = $app.SamlMetadataUrl
+            UniqueName                      = $app.UniqueName
+            TokenEncryptionKeyId            = $app.TokenEncryptionKeyId
+            NativeAuthenticationApisEnabled = $app.NativeAuthenticationApisEnabled
+            ManagerApplications             = if ($app.ManagerApplications) { $app.ManagerApplications -join '; ' } else { '' }
+            VerifiedPublisherJson           = ConvertTo-IamScoutJson $app.VerifiedPublisher
+            CertificationJson               = ConvertTo-IamScoutJson $app.Certification
+            InfoJson                        = ConvertTo-IamScoutJson $app.Info
+            OptionalClaimsJson              = ConvertTo-IamScoutJson $app.OptionalClaims
+            ParentalControlSettingsJson     = ConvertTo-IamScoutJson $app.ParentalControlSettings
+            RequestSignatureVerificationJson = ConvertTo-IamScoutJson $app.RequestSignatureVerification
+            ServicePrincipalLockConfigurationJson = ConvertTo-IamScoutJson $app.ServicePrincipalLockConfiguration
+            AddInsJson                      = ConvertTo-IamScoutJson $app.AddIns
+            ApiSettingsJson                 = ConvertTo-IamScoutJson ($app.Api | Select-Object AcceptMappedClaims, KnownClientApplications, PreAuthorizedApplications, RequestedAccessTokenVersion)
+            WebSettingsJson                 = ConvertTo-IamScoutJson ($app.Web | Select-Object HomePageUrl, LogoutUrl, ImplicitGrantSettings)
         }
 
         if ($IncludeOwners) {
@@ -129,17 +235,121 @@ function Get-AppRegistration {
                 -Status "$index of $($applications.Count): $($app.DisplayName)" `
                 -PercentComplete (($index / $applications.Count) * 100)
 
-            $record['Owners'] = Get-OwnerDisplay -ApplicationId $app.Id
+            $coreRecord['Owners'] = Get-OwnerDisplay -ApplicationId $app.Id
         }
 
-        $records.Add([pscustomobject]$record)
+        $core.Add([pscustomobject]$coreRecord)
+
+        # --- Redirect URIs (web / spa / publicClient) ---
+        foreach ($source in @(
+            @{ Type = 'Web';          Uris = $app.Web.RedirectUris }
+            @{ Type = 'Spa';          Uris = $app.Spa.RedirectUris }
+            @{ Type = 'PublicClient'; Uris = $app.PublicClient.RedirectUris }
+        )) {
+            foreach ($uri in @($source.Uris)) {
+                if ($null -eq $uri) { continue }
+                $redirectUris.Add([pscustomobject][ordered]@{
+                    AppId       = $app.AppId
+                    DisplayName = $app.DisplayName
+                    Type        = $source.Type
+                    RedirectUri = $uri
+                })
+            }
+        }
+
+        # --- requiredResourceAccess (API permissions) ---
+        foreach ($rra in @($app.RequiredResourceAccess)) {
+            if ($null -eq $rra) { continue }
+            foreach ($access in @($rra.ResourceAccess)) {
+                $requiredResourceAccess.Add([pscustomobject][ordered]@{
+                    AppId         = $app.AppId
+                    DisplayName   = $app.DisplayName
+                    ResourceAppId = $rra.ResourceAppId
+                    PermissionId  = $access.Id
+                    PermissionType = $access.Type   # 'Scope' (delegated) or 'Role' (application)
+                })
+            }
+        }
+
+        # --- keyCredentials (metadata only -- raw key bytes never selected) ---
+        foreach ($key in @($app.KeyCredentials)) {
+            if ($null -eq $key) { continue }
+            $keyCredentials.Add([pscustomobject][ordered]@{
+                AppId               = $app.AppId
+                DisplayName         = $app.DisplayName
+                KeyId               = $key.KeyId
+                CredentialDisplayName = $key.DisplayName
+                Type                = $key.Type
+                Usage               = $key.Usage
+                StartDateTime       = $key.StartDateTime
+                EndDateTime         = $key.EndDateTime
+            })
+        }
+
+        # --- passwordCredentials (metadata only -- secretText is never
+        #     returned by Graph on read; only present on the one-time
+        #     addPassword response, so it is not requested or emitted here) ---
+        foreach ($pwd in @($app.PasswordCredentials)) {
+            if ($null -eq $pwd) { continue }
+            $passwordCredentials.Add([pscustomobject][ordered]@{
+                AppId               = $app.AppId
+                DisplayName         = $app.DisplayName
+                KeyId               = $pwd.KeyId
+                CredentialDisplayName = $pwd.DisplayName
+                Hint                = $pwd.Hint
+                StartDateTime       = $pwd.StartDateTime
+                EndDateTime         = $pwd.EndDateTime
+            })
+        }
+
+        # --- appRoles ---
+        foreach ($role in @($app.AppRoles)) {
+            if ($null -eq $role) { continue }
+            $appRoles.Add([pscustomobject][ordered]@{
+                AppId              = $app.AppId
+                DisplayName        = $app.DisplayName
+                Id                 = $role.Id
+                Value              = $role.Value
+                RoleDisplayName    = $role.DisplayName
+                Description        = $role.Description
+                AllowedMemberTypes = if ($role.AllowedMemberTypes) { $role.AllowedMemberTypes -join '; ' } else { '' }
+                IsEnabled          = $role.IsEnabled
+                Origin             = $role.Origin
+            })
+        }
+
+        # --- oauth2PermissionScopes (nested under api) ---
+        foreach ($scope in @($app.Api.Oauth2PermissionScopes)) {
+            if ($null -eq $scope) { continue }
+            $oauth2Scopes.Add([pscustomobject][ordered]@{
+                AppId                  = $app.AppId
+                DisplayName            = $app.DisplayName
+                Id                     = $scope.Id
+                Value                  = $scope.Value
+                Type                   = $scope.Type
+                IsEnabled              = $scope.IsEnabled
+                AdminConsentDisplayName = $scope.AdminConsentDisplayName
+                AdminConsentDescription = $scope.AdminConsentDescription
+                UserConsentDisplayName = $scope.UserConsentDisplayName
+                UserConsentDescription = $scope.UserConsentDescription
+                Origin                 = $scope.Origin
+            })
+        }
     }
 
     if ($IncludeOwners) {
         Write-Progress -Activity 'Collecting owners' -Completed
     }
 
-    return $records.ToArray()
+    return [pscustomobject]@{
+        Core                    = $core.ToArray()
+        RedirectUris            = $redirectUris.ToArray()
+        RequiredResourceAccess  = $requiredResourceAccess.ToArray()
+        KeyCredentials          = $keyCredentials.ToArray()
+        PasswordCredentials     = $passwordCredentials.ToArray()
+        AppRoles                = $appRoles.ToArray()
+        Oauth2PermissionScopes  = $oauth2Scopes.ToArray()
+    }
 }
 
 
@@ -186,9 +396,16 @@ function Get-OwnerDisplay {
 #-------------------------------------------------------------------------------
 # Export-AppRegistration
 #
-# Purpose : Write the collected records to a single timestamped .xlsx file with a
-#           named worksheet, auto-sized columns, an auto-filter and a frozen header.
-# Params  : -Records          Array of PSCustomObjects to export.
+# Purpose : Write the collected app-registration data to a single timestamped
+#           .xlsx workbook as multiple worksheets: one "Core" sheet (one row
+#           per app) plus one sheet per multi-value collection, each joined
+#           back to Core via an AppId column. Sheets are only written when
+#           they contain rows -- Export-Excel requires at least one row per
+#           worksheet -- but every app is always represented on Core.
+# Params  : -Data             The object returned by Get-AppRegistration
+#                             (Core/RedirectUris/RequiredResourceAccess/
+#                             KeyCredentials/PasswordCredentials/AppRoles/
+#                             Oauth2PermissionScopes array properties).
 #           -OutputDirectory  Folder to write the workbook into.
 # Returns : The full path of the .xlsx file that was written. Throws on failure.
 #-------------------------------------------------------------------------------
@@ -196,8 +413,7 @@ function Export-AppRegistration {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [AllowEmptyCollection()]
-        [object[]] $Records,
+        [pscustomobject] $Data,
 
         [Parameter(Mandatory)]
         [string] $OutputDirectory
@@ -211,15 +427,35 @@ function Export-AppRegistration {
     $fileName  = "EntraAppRegistrations_$timestamp.xlsx"
     $fullPath  = Join-Path -Path $OutputDirectory -ChildPath $fileName
 
+    $sheets = @(
+        @{ Name = 'Core';                   Table = 'Core';                   Records = $Data.Core }
+        @{ Name = 'RedirectUris';            Table = 'RedirectUris';            Records = $Data.RedirectUris }
+        @{ Name = 'RequiredResourceAccess';  Table = 'RequiredResourceAccess';  Records = $Data.RequiredResourceAccess }
+        @{ Name = 'KeyCredentials';          Table = 'KeyCredentials';          Records = $Data.KeyCredentials }
+        @{ Name = 'PasswordCredentials';     Table = 'PasswordCredentials';     Records = $Data.PasswordCredentials }
+        @{ Name = 'AppRoles';                Table = 'AppRoles';                Records = $Data.AppRoles }
+        @{ Name = 'Oauth2PermissionScopes';  Table = 'Oauth2PermissionScopes';  Records = $Data.Oauth2PermissionScopes }
+    )
+
     try {
-        $Records | Export-Excel `
-            -Path $fullPath `
-            -WorksheetName 'AppRegistrations' `
-            -TableName 'AppRegistrations' `
-            -TableStyle 'Medium2' `
-            -AutoSize `
-            -FreezeTopRow `
-            -BoldTopRow
+        foreach ($sheet in $sheets) {
+            $rows = @($sheet.Records)
+            if ($rows.Count -eq 0) {
+                # Core is always written even for a 0-app tenant (Main guards that
+                # case separately); collection sheets with zero entries across
+                # every app are simply omitted rather than writing a headerless sheet.
+                if ($sheet.Name -ne 'Core') { continue }
+            }
+
+            $rows | Export-Excel `
+                -Path $fullPath `
+                -WorksheetName $sheet.Name `
+                -TableName $sheet.Table `
+                -TableStyle 'Medium2' `
+                -AutoSize `
+                -FreezeTopRow `
+                -BoldTopRow
+        }
     }
     catch {
         throw "Failed to write Excel file '$fullPath': $($_.Exception.Message)"
@@ -245,14 +481,14 @@ try {
     Connect-IamScoutGraph -TenantId $TenantId -ClientId $ClientId -ResetCredential:$ResetCredential
     $connected = $true
 
-    $records = Get-AppRegistration -IncludeOwners:$IncludeOwners
+    $appData = Get-AppRegistration -IncludeOwners:$IncludeOwners
 
-    if (@($records).Count -eq 0) {
+    if (@($appData.Core).Count -eq 0) {
         Write-Warning "No app registrations found in this tenant. Nothing to export."
     }
     else {
-        $outputFile = Export-AppRegistration -Records $records -OutputDirectory $OutputDirectory
-        Write-Host "Exported $(@($records).Count) app registration(s) to:" -ForegroundColor Green
+        $outputFile = Export-AppRegistration -Data $appData -OutputDirectory $OutputDirectory
+        Write-Host "Exported $(@($appData.Core).Count) app registration(s) to:" -ForegroundColor Green
         Write-Host "  $outputFile" -ForegroundColor Green
     }
 }
