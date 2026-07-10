@@ -87,4 +87,4 @@ Before finishing any task, answer briefly (skip any that don't apply — don't p
 3. Is there a faster or lower-token way I could have approached this that I only figured out partway through?
 4. Nothing to note? Say so in one line and stop.
 
-Write anything from 1–3 as a single dated entry in `docs/LEARNINGS.md`. **Never edit this file (CLAUDE.md) directly** — propose a diff and wait for approval, per the loop in @docs/README.md.
+Write anything from 1–3 as a single dated entry in `docs/LEARNINGS.md`. **Never edit this file (CLAUDE.md) directly** — propose a diff and wait for approval, per the loop in @docs/README.md. This is now enforced by a PreToolUse hook (`.claude/hooks/protect-claude-md.sh`), not just advisory.

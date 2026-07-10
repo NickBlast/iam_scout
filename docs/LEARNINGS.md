@@ -325,3 +325,45 @@ looks like a real Windows path before trusting it.
 captured (dual-validation requirement, read-only testing) — the SDK
 property-name cross-check and the bash-path-into-pwsh gotcha are one-off
 process findings, not repo conventions.
+
+---
+
+## 2026-07-09 — PreToolUse hook enforcing the CLAUDE.md no-self-edit rule
+
+**What was built:** `.claude/hooks/protect-claude-md.sh`, a PreToolUse hook
+script that reads the tool call's JSON from stdin, extracts
+`tool_input.file_path` (via `python3 -c` with a `grep`/`sed` fallback if
+`python3` isn't present), and if the file's basename is `CLAUDE.md`, writes a
+rejection message to stderr and exits 2 — which blocks the tool call. Any
+other file path exits 0 (allowed). Registered in a new project-level
+`.claude/settings.json` (checked into git, distinct from the existing
+gitignored `.claude/settings.local.json`) as a `PreToolUse` hook matched to
+`Edit|Write|MultiEdit`.
+
+**Why a hook instead of relying on the existing CLAUDE.md instruction alone:**
+CLAUDE.md already said "never edit this file directly," but that was advisory
+only — a model could still forget or talk itself into an exception. A
+PreToolUse hook makes the block mechanical or tool-level rather than
+memory/instruction-following-based.
+
+**Test results:**
+1. `Edit` against `CLAUDE.md` → blocked, stderr showed the expected message
+   (`PreToolUse:Edit hook error: ... do not retry this write.`).
+2. `Write` against `CLAUDE.md` → blocked the same way.
+3. `Edit` against `docs/README.md` (unrelated file, added then reverted a
+   one-line test change) → succeeded normally, confirming the hook only
+   matches on `CLAUDE.md`'s basename and doesn't affect other files.
+
+**Known gap (deliberately deferred):** the hook only intercepts the `Edit`,
+`Write`, and `MultiEdit` tools. Bash-based file mutation (`sed -i`, `cat >`,
+`echo >>`, PowerShell `Set-Content`, etc.) targeting `CLAUDE.md` is not
+covered — those go through the `Bash`/`PowerShell` tools, not a file-edit
+tool, so this hook's matcher never sees them. Not closing this gap now since
+it adds a second hook matched on `Bash|PowerShell` that would need to parse
+shell command strings for a `CLAUDE.md` target, which is more failure-prone
+(quoting, indirection, heredocs) than the benefit currently justifies. Revisit
+only if a Bash-based edit of CLAUDE.md is actually attempted in practice.
+
+**Candidate for CLAUDE.md:** Yes — one line noting the no-self-edit rule is
+now hook-enforced, not just advisory. Proposed separately as a diff for
+review (not applied directly, per the very rule being enforced).
