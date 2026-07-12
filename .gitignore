@@ -6,6 +6,10 @@ output/*
 # Per-developer local settings
 .claude/settings.local.json
 
+# Per-developer TenantId/ClientId defaults (non-secret, but still local-only --
+# see config.psd1.example for the committed template)
+entra-scripts/modules/iam-scout-graph-auth/config.psd1
+
 # Convenience copy of pre-refactor scripts (not the rollback mechanism --
 # git tags are; see docs/LEARNINGS.md)
 .archive/

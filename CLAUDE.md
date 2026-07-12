@@ -45,6 +45,10 @@ something doesn't exist or isn't documented.
   are lowercase-hyphenated; exported PowerShell function names stay PascalCase
   `Verb-Noun` using only `Get-Verb`-approved verbs (e.g. `Connect-IamScoutGraph`)
   — these are two independent naming domains, not a conflict.
+- Non-secret `TenantId`/`ClientId` defaults live in a git-ignored
+  `entra-scripts/modules/iam-scout-graph-auth/config.psd1` (see
+  `config.psd1.example`), set via `Set-IamScoutGraphDefault`; the client
+  secret's DPAPI-store flow is unaffected.
 - Generated `.xlsx` exports go to a gitignored `output/` directory, not the repo root.
 - Never export secret *values* — metadata only (expiry, key ID, type) — once
   Phase 2 adds secrets metadata collection.

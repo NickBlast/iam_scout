@@ -439,3 +439,118 @@ hook's file match is basename-only or full-path.
 
 **Candidate for CLAUDE.md:** No — this is an audit finding requiring a
 decision, not a settled convention yet.
+
+---
+
+## 2026-07-10 — Hook file-mode discrepancy: already resolved
+
+**Follow-up to the previous entry's item 4.** Confirmed via `git ls-files -s
+.claude/hooks/protect-claude-md.sh` that the tracked mode is now `100755`
+(commit `773f62a`, "fix: restore executable bit on protect-claude-md.sh").
+`git log` confirms `773f62a` landed before `3f46e8a` (the commit that
+actually persisted the previous audit entry's text to git history) — so by
+the time that finding reached git history, it was already fixed. The
+100644-vs-100755 gap described in the prior entry is closed. No further
+action needed; noting this so the earlier entry isn't re-flagged as
+outstanding on a future read.
+
+**Candidate for CLAUDE.md:** No — resolved audit follow-up, not a new rule.
+
+---
+
+## 2026-07-10 — Hook basename-matching: current behavior + open decision
+
+**Follow-up to the 2026-07-09 audit entry's two open questions.**
+
+**(b) `docs/CLAUDE.md` existence — factual answer:** confirmed absent.
+Repo-wide search for any file named `CLAUDE.md` returns only the root
+`./CLAUDE.md`. No `docs/CLAUDE.md` exists as of this check.
+
+**(a) Basename vs. exact-root-path matching — current behavior, not
+decided:** `.claude/hooks/protect-claude-md.sh` extracts `tool_input.file_path`
+from the incoming JSON and compares only `basename -- "$file_path"` against
+the literal string `CLAUDE.md` (script lines 14–16). It does not check the
+file's directory — so it matches **any** file named `CLAUDE.md` anywhere in
+the repo tree, not just the root one.
+
+Tradeoff:
+- **Basename-anywhere (current behavior):** simpler script, no path-prefix
+  logic to maintain; but would also block a future `docs/CLAUDE.md` (or any
+  other `CLAUDE.md`) even if that file were intentionally meant to be
+  casually editable and distinct from the root convention doc.
+- **Exact-root-path only:** matches the hook's stated intent more precisely
+  (protect *the* CLAUDE.md, not every file with that name) but adds a small
+  amount of path-comparison logic (resolve to repo-relative or absolute path,
+  compare against `CLAUDE.md` at repo root specifically) and would need a
+  defined behavior for `CLAUDE.md` files in submodules/vendored dirs if any
+  ever appear.
+
+No code change made — **pending Nick's decision**, per the standing
+instruction not to resolve this unilaterally.
+
+**Candidate for CLAUDE.md:** No — pending decision, not yet a settled
+convention.
+
+---
+
+## 2026-07-12 — Phase 2: Service Principal inventory added to the app-registration export
+
+**What was built:** Extended `export-entra-app-registrations-v2.ps1` (same
+script/workbook, no new script, `iam-scout-graph-auth` unchanged) with
+`Get-ServicePrincipalInventory`, joining six new sheets back to `Core` via
+`AppId`: `ServicePrincipals`, `SPKeyCredentials`, `SPPasswordCredentials`,
+`SPAppRoleAssignments`, `SPOauth2PermissionGrants`, `SPMemberOf`. Full detail
+in `docs/ENTRAID_POWERSHELL_PROJECT_PLAN.md`'s updated Phase 2 section.
+
+**Scope validation (Microsoft Learn, before coding):** `Get-MgServicePrincipal`,
+`Get-MgServicePrincipalAppRoleAssignment`, and `Get-MgServicePrincipalMemberOf`
+all stay within the already-consented `Application.Read.All`.
+`Get-MgServicePrincipalOauth2PermissionGrant` (delegated permissions) needs
+**`Directory.Read.All`** — broader, confirmed via the REST reference page
+(`serviceprincipal-list-oauth2permissiongrants`), which the PowerShell
+cmdlet's own doc page doesn't surface a permissions table for at all (the
+`Get-MgServicePrincipalOauth2PermissionGrant`/`Get-MgServicePrincipalMemberOf`
+PowerShell-cmdlet doc pages have no **Permissions** section in this API
+version — only the REST API reference pages do). **Fix/learning:** for
+Microsoft.Graph.Applications relationship cmdlets, don't assume the
+PowerShell cmdlet doc page has the permissions table — fetch the
+corresponding `graph-rest-1.0` REST reference page if the cmdlet page is
+missing one.
+
+**Errors hit during live testing (both fixed):**
+1. `servicePrincipal` has no `createdDateTime` property — neither on the
+   Graph REST resource nor on the deserialized
+   `Microsoft.Graph.PowerShell.Models.MicrosoftGraphServicePrincipal` .NET
+   type (confirmed via `[Type]::GetProperties()`), unlike `application`
+   which does have one. First live run failed with `The property
+   'CreatedDateTime' cannot be found on this object`. **Fix/learning:**
+   the Phase 1 "verify SDK property names via `GetProperties()`" rule
+   (2026-07-09 entry) applies per-resource-type, not just per-property-name
+   guess — a property present on one Graph resource type doesn't imply its
+   sibling resource type has the same one.
+2. Two new worksheet names (`ServicePrincipalAppRoleAssignments`,
+   `ServicePrincipalOauth2PermissionGrants`) exceeded Excel's 31-character
+   worksheet-name limit and were silently truncated by `ImportExcel` (with a
+   warning) on the first live run. **Fix/learning:** shortened to an
+   `SP`-prefixed form (`SPAppRoleAssignments`, `SPOauth2PermissionGrants`,
+   etc.) for all six new sheet/table names — worth checking worksheet-name
+   length (≤31 chars) up front for any future sheet, not just after a
+   truncation warning.
+
+**Live functional test (read-only, real test tenant, 3 app registrations):**
+`ServicePrincipals` resolved all 3 (1:1 with `Core`, `AppId`s match).
+`SPKeyCredentials`/`SPPasswordCredentials` sheets correctly omitted (zero
+credentials on any of the 3 test SPs). `SPAppRoleAssignments` populated (41
+rows across 2 of 3 SPs — real Microsoft Graph app-role grants).
+`SPOauth2PermissionGrants` populated (2 rows) — this test app registration
+already has `Directory.Read.All` consented, so the graceful-degrade
+try/catch path was exercised as the success case rather than the failure
+case; the warning-and-continue behavior itself was not exercised live (code
+reviewed, not empirically triggered). `SPMemberOf` populated (1 row —
+`automation-azure` is a member of the `Global Reader` directory role).
+Zero write/create/delete Graph calls made.
+
+**Candidate for CLAUDE.md:** No — Phase 2 scope/results belong in the
+project plan (done); nothing here is a new cross-cutting convention beyond
+what's already captured (SDK property verification, dual-validation
+requirement).

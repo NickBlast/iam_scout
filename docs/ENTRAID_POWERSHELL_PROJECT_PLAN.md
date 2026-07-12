@@ -48,16 +48,48 @@ No further work needed here except what Phase 0 hygiene surfaces.
 
 ## Phase 2 — Enterprise Apps, Secrets Metadata, Log Data
 
-Scope to define precisely before starting (this is the boundary that
-matters most — write it down before touching code):
+- **Enterprise apps / service principals (COMPLETE, 2026-07-12)** — extended
+  `export-entra-app-registrations-v2.ps1` (same script, same workbook — no
+  new script, no changes to `iam-scout-graph-auth`) with a
+  `Get-ServicePrincipalInventory` function that, for each app registration's
+  `Core` row, resolves its Service Principal and joins six new sheets back to
+  `Core` via `AppId`:
+  - `ServicePrincipals` — one row per resolved SP (`Get-MgServicePrincipal
+    -Filter "appId eq '<appId>'"`); `Application.Read.All` (already
+    consented). No dedicated "get by AppId" SDK parameter exists — `-Filter`
+    is the practical equivalent of the REST `servicePrincipals(appId='{appId}')`
+    addressing.
+  - `SPKeyCredentials` / `SPPasswordCredentials` — credential metadata only
+    (`KeyId`, display name, hint/type/usage, start/end dates); never a secret
+    value or raw key, same guarantee as Phase 1 (Graph never returns them on
+    a list call regardless of `$select`).
+  - `SPAppRoleAssignments` (granted application permissions) —
+    `Get-MgServicePrincipalAppRoleAssignment`, `Application.Read.All`.
+  - `SPOauth2PermissionGrants` (granted delegated permissions) —
+    `Get-MgServicePrincipalOauth2PermissionGrant`. **Needs `Directory.Read.All`**,
+    broader than `Application.Read.All` — confirmed against Microsoft Learn
+    (`graph-rest-1.0` `serviceprincipal-list-oauth2permissiongrants`). The
+    script degrades gracefully: a per-SP try/catch warns once and leaves this
+    sheet's rows empty for affected SPs rather than aborting the export if
+    `Directory.Read.All` isn't consented. (On the test tenant it already was
+    consented, so this path was exercised as the success case, not the
+    failure case — see LEARNINGS.)
+  - `SPMemberOf` (group/directory-role memberships) —
+    `Get-MgServicePrincipalMemberOf`, `Application.Read.All`.
 
-- **Enterprise apps / service principals** — `Get-MgServicePrincipal`,
-  same export pattern as Phase 1
-- **Secrets metadata** — expiration dates, key IDs, credential *type* only.
-  Explicitly **never** the secret values themselves — same rule as AWS
-  collection (never call secret-reading methods)
+  Worksheet names use an `SP`-prefixed short form (e.g. `SPAppRoleAssignments`)
+  because Excel caps worksheet names at 31 characters — the fully-spelled
+  `ServicePrincipal*` names would silently truncate.
+
+  Out of scope for this pass (unchanged): creating/rotating SPs, secrets, or
+  API permissions — read-only only.
+
+- **Secrets metadata** — done as part of the above (`SPKeyCredentials`/
+  `SPPasswordCredentials`); expiration dates, key IDs, credential *type*
+  only. Explicitly **never** the secret values themselves.
 - **Log/sign-in data** — `Get-MgAuditLog*` / `Get-MgReport*`, scope TBD
   (date range, retention, PII handling need a decision before implementation)
+  — not started.
 
 Out of scope for Phase 2 unless explicitly revisited: AWS, FastAPI backend,
 dashboard, SQLite storage — those stay parked until this track is stable.

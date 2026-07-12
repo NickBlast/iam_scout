@@ -63,6 +63,15 @@ $script:RequiredModules = @(
 # here rather than passed to Connect-MgGraph.
 $script:RequiredAppRole = 'Application.Read.All'
 
+# Service Principal oauth2PermissionGrant (delegated permissions) reads need
+# Directory.Read.All -- broader than $script:RequiredAppRole above (verified
+# against Microsoft Learn graph-rest-1.0 serviceprincipal-list-oauth2permissiongrants).
+# Everything else SP-related (the SP object, appRoleAssignments, memberOf)
+# stays within Application.Read.All. If this scope isn't consented,
+# Get-ServicePrincipalInventory degrades gracefully (warns, leaves that SP's
+# delegated-permission rows empty) rather than aborting the export.
+$script:OptionalAppRoleForDelegatedGrants = 'Directory.Read.All'
+
 Import-Module (Join-Path $PSScriptRoot 'modules/iam-scout-graph-auth/iam-scout-graph-auth.psd1') -Force
 
 
@@ -394,19 +403,221 @@ function Get-OwnerDisplay {
 
 
 #-------------------------------------------------------------------------------
+# Get-ServicePrincipalInventory
+#
+# Purpose : For each app registration's Core row, resolve its Service
+#           Principal (if one exists) and flatten it plus its credential
+#           metadata, granted application permissions (appRoleAssignments),
+#           granted delegated permissions (oauth2PermissionGrants), and
+#           group/directory-role memberships (memberOf) into join-by-AppId
+#           row sets, mirroring Get-AppRegistration's Core+collections shape.
+#           Every Graph call here is read-only (Get-Mg*), no writes.
+# Params  : -Core  The Core array from Get-AppRegistration (supplies AppId +
+#                  DisplayName without any extra Graph call).
+# Returns : A PSCustomObject with ServicePrincipals/ServicePrincipalKeyCredentials/
+#           ServicePrincipalPasswordCredentials/ServicePrincipalAppRoleAssignments/
+#           ServicePrincipalOauth2PermissionGrants/ServicePrincipalMemberOf array
+#           properties. Per-app/per-SP failures are isolated (warned, skipped)
+#           rather than aborting the whole run -- most notably
+#           oauth2PermissionGrants, which needs Directory.Read.All (broader
+#           than the Application.Read.All this script otherwise requires; see
+#           $script:OptionalAppRoleForDelegatedGrants above).
+#-------------------------------------------------------------------------------
+function Get-ServicePrincipalInventory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object[]] $Core
+    )
+
+    # Top-level servicePrincipal properties needed for the ServicePrincipals
+    # sheet plus its two credential collections. Raw key bytes/secret values
+    # are never returned by a list call regardless of $select (same behavior
+    # as the application resource, confirmed in the 2026-07-09 LEARNINGS entry).
+    # NOTE: unlike the application resource, servicePrincipal has no
+    # createdDateTime property on either the Graph REST resource or the
+    # deserialized Microsoft.Graph.PowerShell.Models.MicrosoftGraphServicePrincipal
+    # .NET type (verified via GetProperties() during live testing) -- omitted here.
+    $spSelectProperties = @(
+        'id'
+        'appId'
+        'displayName'
+        'appDisplayName'
+        'servicePrincipalType'
+        'accountEnabled'
+        'appOwnerOrganizationId'
+        'signInAudience'
+        'tags'
+        'keyCredentials'
+        'passwordCredentials'
+    )
+
+    $servicePrincipals              = [System.Collections.Generic.List[object]]::new()
+    $spKeyCredentials               = [System.Collections.Generic.List[object]]::new()
+    $spPasswordCredentials          = [System.Collections.Generic.List[object]]::new()
+    $spAppRoleAssignments           = [System.Collections.Generic.List[object]]::new()
+    $spOauth2PermissionGrants       = [System.Collections.Generic.List[object]]::new()
+    $spMemberOf                     = [System.Collections.Generic.List[object]]::new()
+
+    $warnedOnOauth2Scope = $false
+    $index = 0
+    $total = @($Core).Count
+
+    foreach ($appRow in @($Core)) {
+        $index++
+        Write-Progress -Activity 'Collecting service principal inventory' `
+            -Status "$index of $total`: $($appRow.DisplayName)" `
+            -PercentComplete (($index / [math]::Max($total, 1)) * 100)
+
+        try {
+            $sp = @(Get-MgServicePrincipal -Filter "appId eq '$($appRow.AppId)'" -Property $spSelectProperties -All)
+        }
+        catch {
+            Write-Warning "Failed to retrieve service principal for AppId '$($appRow.AppId)' ('$($appRow.DisplayName)'): $($_.Exception.Message)"
+            continue
+        }
+
+        if ($sp.Count -eq 0) {
+            Write-Warning "No service principal found for AppId '$($appRow.AppId)' ('$($appRow.DisplayName)') -- app registration may not be consented/instantiated in this tenant. Skipping."
+            continue
+        }
+
+        foreach ($principal in $sp) {
+            $servicePrincipals.Add([pscustomobject][ordered]@{
+                AppId                  = $principal.AppId
+                DisplayName            = $principal.DisplayName
+                Id                     = $principal.Id
+                ServicePrincipalType   = $principal.ServicePrincipalType
+                AccountEnabled         = $principal.AccountEnabled
+                AppOwnerOrganizationId = $principal.AppOwnerOrganizationId
+                SignInAudience         = $principal.SignInAudience
+                Tags                   = if ($principal.Tags) { $principal.Tags -join '; ' } else { '' }
+            })
+
+            foreach ($key in @($principal.KeyCredentials)) {
+                if ($null -eq $key) { continue }
+                $spKeyCredentials.Add([pscustomobject][ordered]@{
+                    AppId                 = $principal.AppId
+                    DisplayName           = $principal.DisplayName
+                    KeyId                 = $key.KeyId
+                    CredentialDisplayName = $key.DisplayName
+                    Type                  = $key.Type
+                    Usage                 = $key.Usage
+                    StartDateTime         = $key.StartDateTime
+                    EndDateTime           = $key.EndDateTime
+                })
+            }
+
+            foreach ($pwdCred in @($principal.PasswordCredentials)) {
+                if ($null -eq $pwdCred) { continue }
+                $spPasswordCredentials.Add([pscustomobject][ordered]@{
+                    AppId                 = $principal.AppId
+                    DisplayName           = $principal.DisplayName
+                    KeyId                 = $pwdCred.KeyId
+                    CredentialDisplayName = $pwdCred.DisplayName
+                    Hint                  = $pwdCred.Hint
+                    StartDateTime         = $pwdCred.StartDateTime
+                    EndDateTime           = $pwdCred.EndDateTime
+                })
+            }
+
+            try {
+                $assignments = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $principal.Id -All)
+                foreach ($assignment in $assignments) {
+                    $spAppRoleAssignments.Add([pscustomobject][ordered]@{
+                        AppId                = $principal.AppId
+                        DisplayName          = $principal.DisplayName
+                        AppRoleId            = $assignment.AppRoleId
+                        PrincipalDisplayName = $assignment.PrincipalDisplayName
+                        ResourceDisplayName  = $assignment.ResourceDisplayName
+                        ResourceId           = $assignment.ResourceId
+                        CreatedDateTime      = $assignment.CreatedDateTime
+                    })
+                }
+            }
+            catch {
+                Write-Warning "Failed to retrieve app role assignments for service principal '$($principal.DisplayName)' ($($principal.Id)): $($_.Exception.Message)"
+            }
+
+            try {
+                $grants = @(Get-MgServicePrincipalOauth2PermissionGrant -ServicePrincipalId $principal.Id -All)
+                foreach ($grant in $grants) {
+                    $spOauth2PermissionGrants.Add([pscustomobject][ordered]@{
+                        AppId       = $principal.AppId
+                        DisplayName = $principal.DisplayName
+                        ConsentType = $grant.ConsentType
+                        PrincipalId = $grant.PrincipalId
+                        ResourceId  = $grant.ResourceId
+                        Scope       = $grant.Scope
+                    })
+                }
+            }
+            catch {
+                if (-not $warnedOnOauth2Scope) {
+                    Write-Warning "Failed to retrieve delegated permission grants (requires '$script:OptionalAppRoleForDelegatedGrants', broader than '$script:RequiredAppRole') -- leaving ServicePrincipalOauth2PermissionGrants empty for affected service principals. First error: $($_.Exception.Message)"
+                    $warnedOnOauth2Scope = $true
+                }
+            }
+
+            try {
+                $memberships = @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $principal.Id -All)
+                foreach ($membership in $memberships) {
+                    $memberType = if ($membership.AdditionalProperties -and $membership.AdditionalProperties['@odata.type']) {
+                        ($membership.AdditionalProperties['@odata.type'] -replace '^#microsoft\.graph\.', '')
+                    } else {
+                        ''
+                    }
+                    $memberDisplayName = if ($membership.AdditionalProperties -and $membership.AdditionalProperties['displayName']) {
+                        $membership.AdditionalProperties['displayName']
+                    } else {
+                        ''
+                    }
+                    $spMemberOf.Add([pscustomobject][ordered]@{
+                        AppId          = $principal.AppId
+                        DisplayName    = $principal.DisplayName
+                        Id             = $membership.Id
+                        MemberType     = $memberType
+                        MemberDisplayName = $memberDisplayName
+                    })
+                }
+            }
+            catch {
+                Write-Warning "Failed to retrieve group/directory-role memberships for service principal '$($principal.DisplayName)' ($($principal.Id)): $($_.Exception.Message)"
+            }
+        }
+    }
+
+    Write-Progress -Activity 'Collecting service principal inventory' -Completed
+
+    return [pscustomobject]@{
+        ServicePrincipals                      = $servicePrincipals.ToArray()
+        ServicePrincipalKeyCredentials          = $spKeyCredentials.ToArray()
+        ServicePrincipalPasswordCredentials     = $spPasswordCredentials.ToArray()
+        ServicePrincipalAppRoleAssignments       = $spAppRoleAssignments.ToArray()
+        ServicePrincipalOauth2PermissionGrants   = $spOauth2PermissionGrants.ToArray()
+        ServicePrincipalMemberOf                 = $spMemberOf.ToArray()
+    }
+}
+
+
+#-------------------------------------------------------------------------------
 # Export-AppRegistration
 #
-# Purpose : Write the collected app-registration data to a single timestamped
-#           .xlsx workbook as multiple worksheets: one "Core" sheet (one row
-#           per app) plus one sheet per multi-value collection, each joined
-#           back to Core via an AppId column. Sheets are only written when
-#           they contain rows -- Export-Excel requires at least one row per
-#           worksheet -- but every app is always represented on Core.
-# Params  : -Data             The object returned by Get-AppRegistration
-#                             (Core/RedirectUris/RequiredResourceAccess/
-#                             KeyCredentials/PasswordCredentials/AppRoles/
-#                             Oauth2PermissionScopes array properties).
-#           -OutputDirectory  Folder to write the workbook into.
+# Purpose : Write the collected app-registration and service-principal data to
+#           a single timestamped .xlsx workbook as multiple worksheets: a
+#           "Core" sheet (one row per app) and a "ServicePrincipals" sheet
+#           (one row per resolved SP) plus one sheet per multi-value
+#           collection, each joined back via an AppId column. Collection
+#           sheets are only written when they contain rows -- Export-Excel
+#           requires at least one row per worksheet -- but Core and
+#           ServicePrincipals are always written when present.
+# Params  : -Data                 The object returned by Get-AppRegistration
+#                                 (Core/RedirectUris/RequiredResourceAccess/
+#                                 KeyCredentials/PasswordCredentials/AppRoles/
+#                                 Oauth2PermissionScopes array properties).
+#           -ServicePrincipalData The object returned by
+#                                 Get-ServicePrincipalInventory.
+#           -OutputDirectory      Folder to write the workbook into.
 # Returns : The full path of the .xlsx file that was written. Throws on failure.
 #-------------------------------------------------------------------------------
 function Export-AppRegistration {
@@ -414,6 +625,9 @@ function Export-AppRegistration {
     param(
         [Parameter(Mandatory)]
         [pscustomobject] $Data,
+
+        [Parameter(Mandatory)]
+        [pscustomobject] $ServicePrincipalData,
 
         [Parameter(Mandatory)]
         [string] $OutputDirectory
@@ -435,6 +649,17 @@ function Export-AppRegistration {
         @{ Name = 'PasswordCredentials';     Table = 'PasswordCredentials';     Records = $Data.PasswordCredentials }
         @{ Name = 'AppRoles';                Table = 'AppRoles';                Records = $Data.AppRoles }
         @{ Name = 'Oauth2PermissionScopes';  Table = 'Oauth2PermissionScopes';  Records = $Data.Oauth2PermissionScopes }
+        # Worksheet names are capped at 31 characters by Excel (ImportExcel
+        # silently truncates -- and warns -- past that), so the longer
+        # ServicePrincipal* collection names below are shortened to an "SP"
+        # prefix here. The underlying $ServicePrincipalData property names
+        # stay fully spelled out; only the sheet/table labels are abbreviated.
+        @{ Name = 'ServicePrincipals';         Table = 'ServicePrincipals';         Records = $ServicePrincipalData.ServicePrincipals }
+        @{ Name = 'SPKeyCredentials';          Table = 'SPKeyCredentials';          Records = $ServicePrincipalData.ServicePrincipalKeyCredentials }
+        @{ Name = 'SPPasswordCredentials';     Table = 'SPPasswordCredentials';     Records = $ServicePrincipalData.ServicePrincipalPasswordCredentials }
+        @{ Name = 'SPAppRoleAssignments';      Table = 'SPAppRoleAssignments';      Records = $ServicePrincipalData.ServicePrincipalAppRoleAssignments }
+        @{ Name = 'SPOauth2PermissionGrants';  Table = 'SPOauth2PermissionGrants';  Records = $ServicePrincipalData.ServicePrincipalOauth2PermissionGrants }
+        @{ Name = 'SPMemberOf';                Table = 'SPMemberOf';                Records = $ServicePrincipalData.ServicePrincipalMemberOf }
     )
 
     try {
@@ -442,8 +667,11 @@ function Export-AppRegistration {
             $rows = @($sheet.Records)
             if ($rows.Count -eq 0) {
                 # Core is always written even for a 0-app tenant (Main guards that
-                # case separately); collection sheets with zero entries across
-                # every app are simply omitted rather than writing a headerless sheet.
+                # case separately). Every other sheet -- including ServicePrincipals,
+                # which can legitimately be empty even when Core has rows, e.g. a
+                # tenant where no app registration has been consented into an SP --
+                # is a joined collection and is omitted entirely rather than writing
+                # a headerless sheet (Export-Excel requires at least one row).
                 if ($sheet.Name -ne 'Core') { continue }
             }
 
@@ -487,8 +715,11 @@ try {
         Write-Warning "No app registrations found in this tenant. Nothing to export."
     }
     else {
-        $outputFile = Export-AppRegistration -Data $appData -OutputDirectory $OutputDirectory
-        Write-Host "Exported $(@($appData.Core).Count) app registration(s) to:" -ForegroundColor Green
+        Write-Host "Retrieving service principal inventory..." -ForegroundColor Cyan
+        $spData = Get-ServicePrincipalInventory -Core $appData.Core
+
+        $outputFile = Export-AppRegistration -Data $appData -ServicePrincipalData $spData -OutputDirectory $OutputDirectory
+        Write-Host "Exported $(@($appData.Core).Count) app registration(s) and $(@($spData.ServicePrincipals).Count) service principal(s) to:" -ForegroundColor Green
         Write-Host "  $outputFile" -ForegroundColor Green
     }
 }

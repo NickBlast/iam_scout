@@ -1,0 +1,4 @@
+@{
+    TenantId = '<tenant-guid-or-domain>'
+    ClientId = '<application-client-id>'
+}

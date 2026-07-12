@@ -36,6 +36,27 @@
 Set-StrictMode -Version Latest
 
 #-------------------------------------------------------------------------------
+# Module-level TenantId/ClientId defaults, loaded (if present) from a
+# git-ignored config.psd1 next to this module. See Set-IamScoutGraphDefault.
+# Non-secret only -- the client secret continues to go through the DPAPI store
+# below, never through config.psd1.
+#-------------------------------------------------------------------------------
+$script:IamScoutGraphConfigPath = Join-Path -Path $PSScriptRoot -ChildPath 'config.psd1'
+$script:IamScoutGraphDefaults   = @{ TenantId = $null; ClientId = $null }
+
+if (Test-Path -LiteralPath $script:IamScoutGraphConfigPath) {
+    try {
+        $loadedConfig = Import-PowerShellDataFile -LiteralPath $script:IamScoutGraphConfigPath
+        if ($loadedConfig.ContainsKey('TenantId')) { $script:IamScoutGraphDefaults.TenantId = $loadedConfig.TenantId }
+        if ($loadedConfig.ContainsKey('ClientId')) { $script:IamScoutGraphDefaults.ClientId = $loadedConfig.ClientId }
+    }
+    catch {
+        Write-Warning "Failed to load $($script:IamScoutGraphConfigPath): $($_.Exception.Message). Connect-IamScoutGraph will fall back to prompting for -TenantId/-ClientId."
+    }
+}
+
+
+#-------------------------------------------------------------------------------
 # Initialize-IamScoutRequiredModule
 #
 # Purpose : Ensure every module in -ModuleName is available (optionally
@@ -263,8 +284,11 @@ function Resolve-IamScoutClientSecret {
 #           PowerShell command resolution an alias OUTRANKS a same-named function.
 #           A function called 'Connect-Graph' would therefore be silently shadowed
 #           once the module is imported.
-# Params  : -TenantId               Tenant id / domain to sign in against.
+# Params  : -TenantId               Tenant id / domain to sign in against. Defaults
+#                                   to the value saved via Set-IamScoutGraphDefault
+#                                   (config.psd1); prompts if neither is available.
 #           -ClientId               Application (client) id of the sign-in app.
+#                                   Same default/prompt behavior as -TenantId.
 #           -CertificateThumbprint  (Certificate parameter set) Cert thumbprint
 #                                   in Cert:\CurrentUser\My or Cert:\LocalMachine\My.
 #           -CertificateName        (Certificate parameter set) Cert subject name,
@@ -277,11 +301,9 @@ function Resolve-IamScoutClientSecret {
 function Connect-IamScoutGraph {
     [CmdletBinding(DefaultParameterSetName = 'ClientSecret')]
     param(
-        [Parameter(Mandatory)]
-        [string] $TenantId,
+        [string] $TenantId = $script:IamScoutGraphDefaults.TenantId,
 
-        [Parameter(Mandatory)]
-        [string] $ClientId,
+        [string] $ClientId = $script:IamScoutGraphDefaults.ClientId,
 
         [Parameter(Mandatory, ParameterSetName = 'Certificate')]
         [string] $CertificateThumbprint,
@@ -292,6 +314,13 @@ function Connect-IamScoutGraph {
         [Parameter(ParameterSetName = 'ClientSecret')]
         [switch] $ResetCredential
     )
+
+    if ([string]::IsNullOrWhiteSpace($TenantId)) {
+        $TenantId = Read-Host -Prompt 'Enter the tenant id (no config.psd1 default -- run Set-IamScoutGraphDefault to persist one)'
+    }
+    if ([string]::IsNullOrWhiteSpace($ClientId)) {
+        $ClientId = Read-Host -Prompt 'Enter the client (application) id (no config.psd1 default -- run Set-IamScoutGraphDefault to persist one)'
+    }
 
     if ($PSCmdlet.ParameterSetName -eq 'Certificate') {
         $connectParams = @{
@@ -342,6 +371,49 @@ function Connect-IamScoutGraph {
 
 
 #-------------------------------------------------------------------------------
+# Set-IamScoutGraphDefault
+#
+# Purpose : Persist TenantId/ClientId (non-secret) as this machine's default for
+#           Connect-IamScoutGraph, so they don't need to be re-entered every
+#           session. Writes config.psd1 next to this module (git-ignored) and
+#           updates the current session's in-memory default immediately. Does
+#           not touch client-secret storage/handling in any way.
+# Params  : -TenantId / -ClientId  Values to persist as defaults.
+# Returns : Nothing.
+#-------------------------------------------------------------------------------
+function Set-IamScoutGraphDefault {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $TenantId,
+
+        [Parameter(Mandatory)]
+        [string] $ClientId
+    )
+
+    $escapedTenantId = $TenantId.Replace("'", "''")
+    $escapedClientId = $ClientId.Replace("'", "''")
+
+    $content = @"
+@{
+    TenantId = '$escapedTenantId'
+    ClientId = '$escapedClientId'
+}
+"@
+
+    Set-Content -LiteralPath $script:IamScoutGraphConfigPath -Value $content -Encoding utf8
+
+    $script:IamScoutGraphDefaults = @{
+        TenantId = $TenantId
+        ClientId = $ClientId
+    }
+
+    Write-Host "Saved default TenantId/ClientId to:" -ForegroundColor Green
+    Write-Host "  $($script:IamScoutGraphConfigPath)" -ForegroundColor DarkGray
+}
+
+
+#-------------------------------------------------------------------------------
 # Disconnect-IamScoutGraph
 #
 # Purpose : Disconnect from Microsoft Graph if currently connected. Safe to call
@@ -363,4 +435,5 @@ Export-ModuleMember -Function @(
     'Initialize-IamScoutRequiredModule'
     'Connect-IamScoutGraph'
     'Disconnect-IamScoutGraph'
+    'Set-IamScoutGraphDefault'
 )

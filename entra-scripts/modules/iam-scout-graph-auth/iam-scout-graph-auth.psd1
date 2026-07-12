@@ -11,6 +11,7 @@
         'Initialize-IamScoutRequiredModule'
         'Connect-IamScoutGraph'
         'Disconnect-IamScoutGraph'
+        'Set-IamScoutGraphDefault'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
