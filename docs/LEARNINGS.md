@@ -4,7 +4,7 @@ Append-only. Newest entries at the bottom. See `IAM_SCOUT_LEARNING_LOOP.md` for
 the workflow this file is part of. Nothing here gets promoted into
 `CLAUDE.md` without an explicit review/approval pass.
 
-<!-- distilled through: never (no CLAUDE.md exists yet) -->
+<!-- distilled through: "2026-07-13 — Phase 3: identity & tenant configuration inventory" -->
 
 ---
 
