@@ -633,3 +633,50 @@ null→''). Zero write/create/delete Graph calls anywhere.
 **Candidate for CLAUDE.md:** Yes, one correction — the "Requires
 `Application.Read.All`" line (see consent-state finding above); proposed
 as a diff, not applied.
+
+---
+
+## 2026-07-13 — Fresh-machine bootstrap fix for -InstallMissingModules
+
+**Review finding (P2) fixed:** both `export-entra-identity-inventory.ps1`
+and `export-entra-app-registrations-v2.ps1` imported
+`iam-scout-graph-auth` at script top-level, but that module's manifest
+declares `RequiredModules = @('Microsoft.Graph.Authentication')` — so on a
+fresh machine the import throws before `Initialize-IamScoutRequiredModule`
+(which lives *inside* the module, chicken-and-egg) could ever honor
+`-InstallMissingModules`. Fix: a minimal inline bootstrap in each script
+ahead of the import — check `Get-Module -ListAvailable
+Microsoft.Graph.Authentication`; install (CurrentUser) when
+`-InstallMissingModules` is set, otherwise fail with the same actionable
+install instructions the module's own checker emits. The manifest keeps
+its `RequiredModules` declaration (still protects standalone module use);
+the full module check in Main is unchanged.
+
+**Validation:** fresh machine simulated by stripping the user module
+directory from `PSModulePath` in a child `pwsh`. Pre-fix version (from git
+HEAD) with `-InstallMissingModules`: dies at `Import-Module` with "The
+required module 'Microsoft.Graph.Authentication' is not loaded" — defect
+reproduced. Post-fix without the flag: clean exit 1 with install
+instructions. Live regression (read-only): identity inventory identical to
+the pre-fix baseline (2 users / 2 roles / 1 member / 0 partners / 1
+default-policy row); v2 workbook compared sheet-by-sheet against the
+validated post-ExpiryStatus run — all 7 sheets, columns and content
+exactly equal (3/44/2/3/41/2/1 rows), zero differences. The install branch
+itself was reasoned, not executed (the simulation's stripped `PSModulePath`
+would make a real `Install-Module` land invisibly; a genuinely fresh
+machine is the only faithful test).
+
+**Error hit during validation (process, not product):** ran the v2
+regression without `-TenantId`/`-ClientId` — they're Mandatory in v2
+(unlike the identity script, which falls back to config.psd1 defaults), so
+the background `pwsh -File` run hung silently on the mandatory-parameter
+prompt with zero output. Fix for next time: v2 always needs explicit
+tenant/client args in non-interactive runs; a background run producing *no
+output at all* within seconds is a stuck prompt, not a slow query. The
+param-default asymmetry between the two scripts is worth unifying
+eventually (v2 could adopt the same config.psd1 fallback) — noted, not
+done (out of this fix's scope).
+
+**Candidate for CLAUDE.md:** No — the bootstrap pattern is now embedded in
+both scripts and this entry; the v2-vs-identity param asymmetry is a
+pending decision, not a settled rule.

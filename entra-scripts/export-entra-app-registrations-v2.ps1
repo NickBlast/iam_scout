@@ -80,6 +80,29 @@ $script:RequiredAppRole = 'Application.Read.All'
 # delegated-permission rows empty) rather than aborting the export.
 $script:OptionalAppRoleForDelegatedGrants = 'Directory.Read.All'
 
+# Bootstrap: the auth module's manifest declares
+# RequiredModules = @('Microsoft.Graph.Authentication'), so this import fails
+# on a fresh machine before Initialize-IamScoutRequiredModule (which lives
+# inside that module) could ever honor -InstallMissingModules. Ensure the one
+# manifest dependency exists first; the full module check still runs in Main.
+if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication')) {
+    if ($InstallMissingModules) {
+        Write-Host "  [install] Microsoft.Graph.Authentication not found -- installing (CurrentUser)..." -ForegroundColor Yellow
+        Install-Module -Name 'Microsoft.Graph.Authentication' -Scope CurrentUser -Repository PSGallery -Force -AllowClobber
+    }
+    else {
+        Write-Error @"
+Missing required module: Microsoft.Graph.Authentication
+
+Install it and re-run, for example:
+    Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
+
+Or re-run with -InstallMissingModules to install it automatically.
+"@
+        exit 1
+    }
+}
+
 Import-Module (Join-Path $PSScriptRoot 'modules/iam-scout-graph-auth/iam-scout-graph-auth.psd1') -Force
 
 
