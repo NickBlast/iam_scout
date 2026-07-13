@@ -94,6 +94,74 @@ No further work needed here except what Phase 0 hygiene surfaces.
 Out of scope for Phase 2 unless explicitly revisited: AWS, FastAPI backend,
 dashboard, SQLite storage — those stay parked until this track is stable.
 
+## Phase 3 — Identity & Tenant Configuration Inventory
+
+A new read-only inventory covering entity domains that do **not** join to the
+app-registration workbook's `Core` sheet by `AppId` — users, directory roles,
+and tenant-level cross-tenant access configuration are a different entity
+domain than app registrations. Phase 3 therefore lives in a **new script**,
+`entra-scripts/export-entra-identity-inventory.ps1`, importing the existing
+`iam-scout-graph-auth` module unchanged and producing its own timestamped
+workbook (`EntraIdentityInventory_<timestamp>.xlsx`). Combining it into the
+app-registration export was considered and rejected: the sheets would share
+no join key with `Core`, and the two exports have different permission
+footprints (Phase 3 adds `Policy.Read.All`), so keeping them separate lets
+the app-registration export keep running under its narrower consent.
+
+Scope (all read-only `Get-Mg*` calls, zero write/create/delete):
+
+1. **Users** — `Get-MgUser -All` (module `Microsoft.Graph.Users`, new
+   dependency in `requirements.psd1`). One `Users` sheet: `Id`,
+   `UserPrincipalName`, `DisplayName`, `AccountEnabled`, `UserType`
+   (Member/Guest), `CreatedDateTime`. Least-privilege permission to be
+   verified via `Find-MgGraphCommand -Command Get-MgUser` + Microsoft Learn;
+   expected to be covered by the tenant's existing `Directory.Read.All`
+   consent (confirm, don't assume).
+
+2. **Directory roles** — `Get-MgDirectoryRole` (activated roles only) +
+   `Get-MgDirectoryRoleMember` per role (module
+   `Microsoft.Graph.Identity.DirectoryManagement`, new dependency). Two
+   sheets: `DirectoryRoles` (`RoleId`, `RoleTemplateId`, `DisplayName`,
+   `Description`) and `DirectoryRoleMembers` (`RoleId`, `RoleDisplayName`,
+   `MemberId`, `MemberType`, `MemberDisplayName` — member type/display name
+   resolved from the returned `directoryObject`'s `AdditionalProperties`,
+   since the member cmdlet returns bare directory-object references).
+   **Known gap (documented, not worked around):** this surfaces only
+   *activated* directory roles and their current members — PIM-eligible
+   assignments that haven't been activated do not appear.
+
+3. **Secrets expiry status (enhancement to the Phase 2 export, not a new
+   collection)** — a computed `ExpiryStatus` column (`Expired`,
+   `ExpiringSoon`, `OK`; threshold configurable via an
+   `-ExpiringSoonThresholdDays` parameter, default 30) added to the four
+   existing credential sheets in `export-entra-app-registrations-v2.ps1`
+   (`KeyCredentials`, `PasswordCredentials`, `SPKeyCredentials`,
+   `SPPasswordCredentials`), computed from the already-captured
+   `EndDateTime`. No new Graph calls.
+
+4. **Cross-tenant access configuration** —
+   `Get-MgPolicyCrossTenantAccessPolicyDefault` (tenant baseline) +
+   `Get-MgPolicyCrossTenantAccessPolicyPartner -All` (per-partner overrides)
+   (module `Microsoft.Graph.Identity.SignIns`, new dependency). Two sheets:
+   `CrossTenantAccessDefault` (one row) and `CrossTenantAccessPartners` (one
+   row per partner: `TenantId`, B2B collaboration inbound/outbound access
+   type, B2B direct connect inbound/outbound, service-provider flag).
+   Requires **`Policy.Read.All`** — expected to be a genuinely new
+   admin-consent requirement for the test tenant; must be confirmed against
+   the tenant's actual consent state (`Get-MgContext` after app-only
+   connect) and flagged before live testing, not silently assumed either way.
+   If it isn't consented, the script degrades gracefully (warn, leave the
+   two sheets empty) rather than aborting the user/role export.
+
+Validation: the standing dual-validation rule applies (Microsoft Learn
+permission/API check per cmdlet before coding; live read-only functional
+test against the test tenant with actual row counts and field-level results
+reported). Docs pass and script pass are separate commits.
+
+Out of scope for Phase 3: sign-in/audit log data (`Get-MgAuditLogSignIn` /
+`Get-MgAuditLogDirectoryAudit`) — deferred; PIM-eligible role assignments
+(noted as a gap above, not collected).
+
 ## CLAUDE.md seed content (once Phase 0 creates the file)
 
 ```markdown
