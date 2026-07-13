@@ -44,7 +44,15 @@ param(
     # Discard any previously stored client secret and prompt for a new one. Use
     # after the app secret has been rotated.
     [Parameter()]
-    [switch] $ResetCredential
+    [switch] $ResetCredential,
+
+    # Credentials whose EndDateTime falls within this many days from now are
+    # marked 'ExpiringSoon' in the computed ExpiryStatus column on the four
+    # credential sheets (KeyCredentials, PasswordCredentials,
+    # SPKeyCredentials, SPPasswordCredentials).
+    [Parameter()]
+    [ValidateRange(1, 3650)]
+    [int] $ExpiringSoonThresholdDays = 30
 )
 
 Set-StrictMode -Version Latest
@@ -92,6 +100,33 @@ function ConvertTo-IamScoutJson {
         if ($null -eq $InputObject) { return '' }
         return ($InputObject | ConvertTo-Json -Compress -Depth 8)
     }
+}
+
+
+#-------------------------------------------------------------------------------
+# Get-IamScoutExpiryStatus
+#
+# Purpose : Classify a credential's EndDateTime for the computed ExpiryStatus
+#           column on the four credential sheets: 'Expired' (end date in the
+#           past), 'ExpiringSoon' (within -ExpiringSoonThresholdDays from
+#           now), 'OK' (later than that), or '' when Graph returned no end
+#           date. Comparison is done in UTC (Graph returns UTC datetimes).
+#-------------------------------------------------------------------------------
+function Get-IamScoutExpiryStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [nullable[datetime]] $EndDateTime
+    )
+
+    if ($null -eq $EndDateTime) { return '' }
+
+    $nowUtc = (Get-Date).ToUniversalTime()
+    $endUtc = $EndDateTime.ToUniversalTime()
+
+    if ($endUtc -lt $nowUtc) { return 'Expired' }
+    if ($endUtc -lt $nowUtc.AddDays($ExpiringSoonThresholdDays)) { return 'ExpiringSoon' }
+    return 'OK'
 }
 
 
@@ -292,6 +327,7 @@ function Get-AppRegistration {
                 Usage               = $key.Usage
                 StartDateTime       = $key.StartDateTime
                 EndDateTime         = $key.EndDateTime
+                ExpiryStatus        = Get-IamScoutExpiryStatus -EndDateTime $key.EndDateTime
             })
         }
 
@@ -308,6 +344,7 @@ function Get-AppRegistration {
                 Hint                = $pwd.Hint
                 StartDateTime       = $pwd.StartDateTime
                 EndDateTime         = $pwd.EndDateTime
+                ExpiryStatus        = Get-IamScoutExpiryStatus -EndDateTime $pwd.EndDateTime
             })
         }
 
@@ -505,6 +542,7 @@ function Get-ServicePrincipalInventory {
                     Usage                 = $key.Usage
                     StartDateTime         = $key.StartDateTime
                     EndDateTime           = $key.EndDateTime
+                    ExpiryStatus          = Get-IamScoutExpiryStatus -EndDateTime $key.EndDateTime
                 })
             }
 
@@ -518,6 +556,7 @@ function Get-ServicePrincipalInventory {
                     Hint                  = $pwdCred.Hint
                     StartDateTime         = $pwdCred.StartDateTime
                     EndDateTime           = $pwdCred.EndDateTime
+                    ExpiryStatus          = Get-IamScoutExpiryStatus -EndDateTime $pwdCred.EndDateTime
                 })
             }
 
