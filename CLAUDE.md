@@ -31,7 +31,13 @@ something doesn't exist or isn't documented.
 - PowerShell 7, requires `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`,
   `ImportExcel` (never the full `Microsoft.Graph` meta-module — load time).
 - App-only (client-credentials) auth against Graph — no delegated/user sign-in.
-- Requires the `Application.Read.All` **application** permission with admin consent.
+- Graph authorization: the scripts need the documented **application**
+  permissions (app-registration export: `Application.Read.All`; identity
+  inventory: `Directory.Read.All`-level reads + `Policy.Read.All`) with admin
+  consent, **or** an equivalent Entra directory role assigned to the app's
+  service principal. The test tenant currently uses the latter — an active
+  tenant-wide **Global Reader** assignment and no app-role consents at all
+  (verified 2026-07-13; see LEARNINGS).
 - Client secret: captured once via secure prompt, stored DPAPI-encrypted under
   `%LOCALAPPDATA%\EntraAppExport`, never logged, exported, or passed as a parameter.
 - Always pass `-All` explicitly to Graph list cmdlets (e.g. `Get-MgApplication`) —
