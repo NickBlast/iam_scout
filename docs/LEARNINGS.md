@@ -554,3 +554,82 @@ Zero write/create/delete Graph calls made.
 project plan (done); nothing here is a new cross-cutting convention beyond
 what's already captured (SDK property verification, dual-validation
 requirement).
+
+---
+
+## 2026-07-13 — Phase 3: identity & tenant configuration inventory
+
+**What was built:** Tagged `pre-phase3-identity-inventory`. New
+`entra-scripts/export-entra-identity-inventory.ps1` (own workbook — users/
+roles/cross-tenant policy share no `AppId` join with the app-registration
+`Core`, so a new script per the plan's stated tradeoff), sheets `Users`,
+`DirectoryRoles`, `DirectoryRoleMembers`, `CrossTenantAccessDefault`,
+`CrossTenantAccessPartners`. `iam-scout-graph-auth` imported unchanged.
+Separately, `export-entra-app-registrations-v2.ps1` gained a computed
+`ExpiryStatus` column (`Expired`/`ExpiringSoon`/`OK`, `''` for null end
+dates, `-ExpiringSoonThresholdDays` default 30, UTC comparison) on the four
+credential sheets — no new Graph calls. `requirements.psd1` gained
+`Microsoft.Graph.Users`, `Microsoft.Graph.Identity.DirectoryManagement`,
+`Microsoft.Graph.Identity.SignIns`.
+
+**Consent-state finding (major, corrects a standing assumption):** the
+export app's service principal (`automation-azure`) has **zero Graph
+application-permission grants** — `Get-MgServicePrincipalAppRoleAssignment`
+returns an empty list, and `Get-MgContext.Scopes` is empty app-only. The
+CLAUDE.md line "Requires the `Application.Read.All` application permission
+with admin consent" does not match the tenant: every Phase 1–3 read has
+been authorized by the SP's **active tenant-wide Global Reader directory
+role assignment** (confirmed via `roleManagement/directory/roleAssignments`:
+principalId = the SP, directoryScopeId = `/`), not by consented app roles.
+Practical consequence observed live: `Get-MgPolicyCrossTenantAccessPolicyDefault`
+/ `...Partner` succeeded **without** `Policy.Read.All` — Global Reader
+covers those reads too, so the flagged "new admin consent needed" turned
+out to be *not needed on this tenant* (would be needed on a tenant where
+the app relies on app-role consents instead of a directory role).
+**Candidate CLAUDE.md correction to propose:** the auth requirement line
+should say the app needs *either* the documented app permissions *or* an
+equivalent directory role (current test tenant: Global Reader).
+
+**Graph inconsistency found (documented as a known gap in the script
+header):** legacy `/directoryRoles/{id}/members` (and `scopedMembers`)
+returned **0 members for Global Reader**, while both the SP's own
+`memberOf` and the modern `roleManagement/directory/roleAssignments`
+endpoint report the SP's active tenant-wide assignment. `DirectoryRoleMembers`
+correctly shows user members (Global Administrator → 1 user) but silently
+omits at least SP members on this tenant — treat the sheet as
+user-membership-reliable, not SP-complete. Also noted per the task spec:
+the sheet only ever covers *activated* roles; PIM-eligible-but-unactivated
+assignments never appear.
+
+**Permission checks (Microsoft Learn, before coding):** list users — least
+app permission `User.Read.All`, `Directory.Read.All` covers it (also
+confirmed via `Find-MgGraphCommand -Command Get-MgUser`); list
+directoryRoles/members — least `RoleManagement.Read.Directory`,
+`Directory.Read.All` covers; cross-tenant default/partners —
+`Policy.Read.All`. SDK .NET property names verified via `GetProperties()`
+before the live run (`B2BCollaborationInbound` etc. on
+`MicrosoftGraphCrossTenantAccessPolicyConfigurationDefault/Partner`,
+`AccessType`/`Targets` on the target configuration, all `User`/
+`DirectoryRole` fields) — zero property-name failures at runtime this
+phase, first phase where that rule prevented rather than diagnosed an
+error.
+
+**Live functional test (read-only, test tenant):** identity inventory —
+`Users` 2 rows (both accounts expected, `UserType` Member, fields all
+populated), `DirectoryRoles` 2 rows (Global Reader, Global Administrator),
+`DirectoryRoleMembers` 1 row (Global Administrator → Nicholas Lundquist;
+Global Reader's SP member missing per the gap above),
+`CrossTenantAccessDefault` 1 row (`IsServiceDefault=True`, B2B collab
+in/out `allowed`, B2B direct connect in/out `blocked`, matching service
+defaults), `CrossTenantAccessPartners` omitted (0 partners).
+v2 ExpiryStatus — prior (tagged) vs new run diffed field-for-field across
+all 7 sheets: row counts identical (3/44/2/3/41/2/1), **0 mismatches** on
+every shared column; `ExpiryStatus` the only added column
+(`PasswordCredentials`: one `OK` [expires 2027-07], one `Expired`
+[expired 2026-05]). `ExpiringSoon` branch not present in tenant data, so
+exercised synthetically (−1d→Expired, +10d/+29d→ExpiringSoon, +31d→OK,
+null→''). Zero write/create/delete Graph calls anywhere.
+
+**Candidate for CLAUDE.md:** Yes, one correction — the "Requires
+`Application.Read.All`" line (see consent-state finding above); proposed
+as a diff, not applied.
