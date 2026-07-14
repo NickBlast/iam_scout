@@ -680,3 +680,52 @@ done (out of this fix's scope).
 **Candidate for CLAUDE.md:** No — the bootstrap pattern is now embedded in
 both scripts and this entry; the v2-vs-identity param asymmetry is a
 pending decision, not a settled rule.
+
+---
+
+## 2026-07-13 — sync-monitor: Entra Connect sync health monitor MVP
+
+**What was built/changed:** New top-level `sync-monitor/` module (isolated
+from `entra-scripts/`): event-log polling of ADSync engine errors
+(`Get-WinEvent`, RecordId high-water-mark dedup), tenant-side staleness
+check via `Get-MgOrganization` reusing `Connect-IamScoutGraph` unchanged,
+editable JSON error catalog with a never-drop unmapped fallback, JSON Lines
+catalog log, and unauthenticated-relay email via `System.Net.Mail`
+(`Send-MailMessage` is deprecated on PS7). Entry point
+`scripts/watch-entra-sync-health.ps1`, designed for a 5-minute Scheduled
+Task. Design/test doc at `sync-monitor/docs/SYNC-MONITOR-DESIGN.md`.
+
+**Permission validation:** Microsoft Learn `organization-get`
+(graph-rest-1.0) lists `Directory.Read.All` as a sufficient *application*
+permission for GET /organization — already consented, so no new scope.
+Caveat worth remembering: the **Get-MgOrganization PowerShell cmdlet doc
+page shows a bogus Intune-centric permission table**
+(DeviceManagementServiceConfig.*) — the REST API doc is the authoritative
+permissions source, not the cmdlet page.
+
+**Errors/wrong assumptions that cost iterations (all caught by testing
+before commit):**
+1. `ConvertFrom-Json` re-hydrates ISO-8601 strings into `[datetime]`,
+   silently breaking string-equality dedup keys and re-serializing with
+   machine-local offsets. Fix: normalize back to round-trip `'o'` UTC
+   strings on state load. The same effect made a *correctly stored* catalog
+   timestamp look wrong during inspection — check the raw JSONL line before
+   concluding the writer is buggy.
+2. `Get-WinEvent`'s missing-provider error text is "There is not an event
+   provider…", which a too-clever regex (`'no event.*provider'`) missed.
+3. Returning `@()` from a function unwraps to `$null` through the pipeline,
+   so `.Count` explodes under `Set-StrictMode`; `return , @(...)` preserves
+   the array.
+
+**Discovered, undocumented elsewhere:** documented ADSync Application-log
+event IDs for the error catalog are 0/611/652/655/6900 (source "Directory
+Synchronization"), grounded in Learn's `troubleshoot-pwd-sync` and
+`tshoot-connect-password-hash-synchronization` pages.
+
+**Test-environment limits (re-verify at deployment):** dev machine has no
+ADSync provider and the test tenant has `onPremisesSyncEnabled = $null`, so
+the real ADSync-event and real STALE_SYNC paths ran only via forced-path
+equivalents (a provider with real errors → unmapped alerts + email captured
+by a local SMTP listener; staleness verdicts via the pure decision
+function). Clean pass, forced alert (11 events → catalog + received email),
+and dedup re-run all verified live.
