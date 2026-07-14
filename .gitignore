@@ -10,6 +10,12 @@ output/*
 # see config.psd1.example for the committed template)
 entra-scripts/modules/iam-scout-graph-auth/config.psd1
 
+# Sync monitor runtime artifacts (catalog/operational logs, dedup state) and
+# the per-environment config (syncmonitor-config.psd1.example is the template)
+sync-monitor/logs/*
+!sync-monitor/logs/.gitkeep
+sync-monitor/config/syncmonitor-config.psd1
+
 # Convenience copy of pre-refactor scripts (not the rollback mechanism --
 # git tags are; see docs/LEARNINGS.md)
 .archive/

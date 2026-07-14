@@ -1,0 +1,40 @@
+# Entra Connect sync health monitor -- configuration template.
+#
+# Copy to syncmonitor-config.psd1 (git-ignored, same convention as the
+# graph-auth module's config.psd1) and fill in your environment's values.
+# Format is .psd1 rather than JSON deliberately: it supports comments, parses
+# natively via Import-PowerShellDataFile with no code execution, and matches
+# the existing repo convention -- the tradeoff is that non-PowerShell tooling
+# can't read it, which doesn't matter here because only this monitor does.
+@{
+    # Minutes without a successful tenant-side sync before STALE_SYNC fires.
+    StalenessThresholdMinutes = 45
+
+    # Informational: cadence the Scheduled Task should run the entry script at.
+    # The script itself is single-shot; this value is used when registering
+    # the task (see sync-monitor/docs/SYNC-MONITOR-DESIGN.md).
+    PollIntervalMinutes = 5
+
+    EventLog = @{
+        LogName = 'Application'
+
+        # Event sources the Entra Connect engine logs under. A source that is
+        # not registered on the machine is skipped with a warning, not fatal.
+        Providers = @('ADSync', 'Directory Synchronization')
+
+        # 1 = Critical, 2 = Error. Add 3 (Warning) only if you want the noise.
+        Levels = @(1, 2)
+
+        # First run only (no saved state yet): how far back to scan.
+        # Subsequent runs resume from the last processed event RecordId.
+        FirstRunLookbackMinutes = 60
+    }
+
+    Smtp = @{
+        # Internal unauthenticated relay -- hostname or IP, and port.
+        Server = 'smtp-relay.example.internal'
+        Port   = 25
+        From   = 'entra-sync-monitor@example.com'
+        To     = @('iam-team@example.com')
+    }
+}

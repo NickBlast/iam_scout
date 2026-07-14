@@ -1,0 +1,75 @@
+{
+  "_about": "Editable error catalog for the Entra Connect sync health monitor. 'events' maps Windows Application-log event IDs (sources ADSync / Directory Synchronization) to a meaning and remediation checklist. 'special' holds non-event-log detection keys. 'unmapped' is the fallback for any event ID not listed here -- unmapped events are still logged and alerted, never dropped. Event IDs 0/611/652/655/6900 are documented on Microsoft Learn (troubleshoot-pwd-sync, tshoot-connect-password-hash-synchronization). Add new IDs here as they are encountered; no code change is needed.",
+  "events": {
+    "0": {
+      "meaning": "Directory Synchronization connectivity/credential error (documented on Microsoft Learn alongside 611/652/655 as a password-sync connectivity problem; one known variant is Entra credentials invalidated after being updated through FIM).",
+      "checklist": [
+        "Read the full event message -- ID 0 is a catch-all; the message text identifies the actual failure.",
+        "Check connectivity from the sync server to Microsoft Entra (proxy/firewall changes).",
+        "If the message says the user name or password is incorrect, re-run the Microsoft Entra Connect configuration wizard to refresh the connector credentials."
+      ]
+    },
+    "611": {
+      "meaning": "Password hash synchronization failed for a domain (DRS/RPC replication error against a domain controller, e.g. RPC 8453 'Replication access was denied').",
+      "checklist": [
+        "Identify the failing domain from the event message.",
+        "Verify the AD DS Connector account has 'Replicating Directory Changes' and 'Replicating Directory Changes All' at the root of that domain.",
+        "Check reachability of that domain's domain controllers from the sync server.",
+        "If errors persist, confirm Entra Connect is on a current build (several 611 variants are fixed bugs)."
+      ]
+    },
+    "652": {
+      "meaning": "Failed credential provisioning batch -- password hash sync could not deliver a batch of password updates to Microsoft Entra ID.",
+      "checklist": [
+        "Read the embedded error code (e.g. 90 = password sync not activated for the tenant; 81 = service busy/transient).",
+        "If error code 90: verify password hash sync is still enabled in Entra Connect (Get-ADSyncAADPasswordSyncState).",
+        "If transient (service busy): confirm it self-recovers on the next cycle before acting."
+      ]
+    },
+    "655": {
+      "meaning": "Failed credential provisioning ping -- the every-30-minutes password-sync heartbeat to Microsoft Entra ID failed.",
+      "checklist": [
+        "Read the embedded error code and description in the event message.",
+        "If it reports invalid credentials, re-run the Entra Connect configuration wizard to refresh the connector account.",
+        "If it reports password sync not activated, re-enable password hash synchronization via the wizard."
+      ]
+    },
+    "6900": {
+      "meaning": "The server hit an unexpected error while processing a password change notification (commonly: password sync not activated for the tenant, or stale Entra connector credentials).",
+      "checklist": [
+        "Read the embedded error code (90 = password sync not activated; credential errors name the account).",
+        "Re-enable password hash synchronization or re-run the configuration wizard as the message indicates.",
+        "Confirm subsequent password changes sync (check for follow-up 6900s after the fix)."
+      ]
+    }
+  },
+  "special": {
+    "STALE_SYNC": {
+      "meaning": "Microsoft Entra reports no successful sync from on-premises within the configured staleness threshold (tenant-side heartbeat, independent of what the local sync engine believes).",
+      "checklist": [
+        "Check the ADSync service is running on the sync server (Get-Service ADSync).",
+        "Check the sync scheduler: Get-ADSyncScheduler (SyncCycleEnabled, NextSyncCycleStartTimeInUTC, staging mode).",
+        "Check Synchronization Service Manager for stopped/errored run profiles.",
+        "Check outbound connectivity from the sync server to Microsoft Entra.",
+        "If a maintenance window or deliberate pause explains it, note it and clear the alert."
+      ]
+    },
+    "HEARTBEAT_CHECK_FAILED": {
+      "meaning": "The monitor itself could not complete the Graph staleness check (auth failure, network, Graph outage) -- sync staleness is currently UNVERIFIED, not necessarily broken.",
+      "checklist": [
+        "Read the error detail in this entry -- auth errors point at the app registration/secret, network errors at connectivity.",
+        "Check whether the client secret for the monitoring app registration has expired.",
+        "Confirm outbound HTTPS from the sync server to graph.microsoft.com.",
+        "Until this clears, treat sync staleness as unknown and verify manually in the Entra admin center."
+      ]
+    }
+  },
+  "unmapped": {
+    "meaning": "Unmapped ADSync/Directory Synchronization event -- not yet in the error catalog. Review manually.",
+    "checklist": [
+      "Read the full event message in the Application event log (the RecordId is in this entry).",
+      "Search Microsoft Learn / Entra Connect troubleshooting docs for this event ID.",
+      "If it recurs, add the ID to error-catalog.json with a meaning and checklist."
+    ]
+  }
+}
