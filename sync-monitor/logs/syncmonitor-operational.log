@@ -1,0 +1,15 @@
+2026-07-14T04:20:08.2376520Z [INFO] Poll started (config: C:\Users\nlund\.projects\iam_scout\sync-monitor\scripts\..\config\syncmonitor-config.psd1; last RecordId: 0).
+2026-07-14T04:20:08.5949277Z [INFO] Event log check: 0 new event(s) from providers [ADSync, Directory Synchronization].
+2026-07-14T04:20:13.6116451Z [INFO] Graph heartbeat: SyncNotEnabled. Tenant reports onPremisesSyncEnabled = '' -- no hybrid sync heartbeat to evaluate.
+2026-07-14T04:20:13.6238223Z [WARN] Tenant reports on-premises sync not enabled -- staleness not evaluated. On a production sync server this deserves investigation.
+2026-07-14T04:20:13.6583860Z [INFO] Poll finished: no issues detected, no alert sent.
+2026-07-14T04:21:24.4854690Z [INFO] Poll started (config: C:\Users\nlund\AppData\Local\Temp\claude\C--Users-nlund--projects-iam-scout\386daae5-078d-4e7d-a806-12911cb9ce0f\scratchpad\forced-test-config.psd1; last RecordId: 0).
+2026-07-14T04:21:24.7803728Z [INFO] Event log check: 11 new event(s) from providers [Application Error].
+2026-07-14T04:21:28.5768053Z [INFO] Graph heartbeat: SyncNotEnabled. Tenant reports onPremisesSyncEnabled = '' -- no hybrid sync heartbeat to evaluate.
+2026-07-14T04:21:28.5875848Z [WARN] Tenant reports on-premises sync not enabled -- staleness not evaluated. On a production sync server this deserves investigation.
+2026-07-14T04:21:28.7393894Z [INFO] Poll finished: 11 issue(s) logged to catalog and alert email sent to iam-team-test@iamscout.local.
+2026-07-14T04:22:25.6166715Z [INFO] Poll started (config: C:\Users\nlund\AppData\Local\Temp\claude\C--Users-nlund--projects-iam-scout\386daae5-078d-4e7d-a806-12911cb9ce0f\scratchpad\forced-test-config.psd1; last RecordId: 65336).
+2026-07-14T04:22:25.9251022Z [INFO] Event log check: 0 new event(s) from providers [Application Error].
+2026-07-14T04:22:29.8538941Z [INFO] Graph heartbeat: SyncNotEnabled. Tenant reports onPremisesSyncEnabled = '' -- no hybrid sync heartbeat to evaluate.
+2026-07-14T04:22:29.8703913Z [WARN] Tenant reports on-premises sync not enabled -- staleness not evaluated. On a production sync server this deserves investigation.
+2026-07-14T04:22:29.8998743Z [INFO] Poll finished: no issues detected, no alert sent.
